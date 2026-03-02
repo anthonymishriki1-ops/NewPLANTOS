@@ -1,0 +1,3353 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <!-- NO user-scalable=no here — that breaks GAS iframe scrolling on iOS.
+       We handle zoom prevention in JS instead. -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="theme-color" content="#4A7A1A" />
+  <title>PlantOS</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Pixelify+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <style>
+    *, *::before, *::after {
+      margin: 0; padding: 0; box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    html, body {
+      width: 100%;
+      /* Use dvh (dynamic viewport height) so browser chrome is excluded.
+         Falls back through svh → vh for older browsers. */
+      height: 100dvh;
+      height: 100svh;
+      height: 100vh;
+      overflow: hidden;
+      overscroll-behavior: none;
+      -webkit-touch-callout: none;
+      background: #8BC34A;
+    }
+
+    /* #root uses JS-measured innerHeight so GAS banner doesn't affect us */
+    #root {
+      width: 100%;
+      /* height set by JS below — falls back to 100% */
+      height: 100%;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Kill 300ms tap delay */
+    button, a, [role="button"] { touch-action: manipulation; }
+
+    /* Kill iOS input zoom — inputs must render ≥16px */
+    input, textarea, select {
+      font-size: 16px !important;
+    }
+
+    /* Momentum scroll for inner scroll areas */
+    .scroll-y {
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      overscroll-behavior-y: contain;
+    }
+
+    @keyframes marquee {
+      0%   { transform: translateX(100%); }
+      100% { transform: translateX(-100%); }
+    }
+    .ticker-track {
+      display: inline-block;
+      white-space: nowrap;
+      padding-left: 100%;
+      animation: marquee 18s linear infinite;
+    }
+
+    /* Safe area insets for notch / home indicator */
+    .pb-safe { padding-bottom: max(8px, env(safe-area-inset-bottom)); }
+
+    /* ══════════════════════════════════════════════════════
+       JAZZ ENHANCEMENTS
+    ══════════════════════════════════════════════════════ */
+
+    .paper-texture { position: relative; }
+    .paper-texture::before {
+      content: '';
+      position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+      background-image:
+        repeating-linear-gradient(90deg, transparent 0px, transparent 2px, rgba(107,68,35,0.025) 2px, rgba(107,68,35,0.025) 4px),
+        repeating-linear-gradient(0deg,  transparent 0px, transparent 2px, rgba(107,68,35,0.025) 2px, rgba(107,68,35,0.025) 4px);
+      pointer-events: none; border-radius: inherit; z-index: 0;
+    }
+    .paper-texture > * { position: relative; z-index: 1; }
+
+    .card-depth {
+      box-shadow: 0 2px 4px rgba(74,48,32,0.10), 0 6px 16px rgba(74,48,32,0.14), inset 0 -1px 0 rgba(255,255,255,0.45);
+    }
+
+    @keyframes fadeInUp {
+      from { opacity: 0; transform: translateY(10px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .fade-in { animation: fadeInUp 0.28s ease-out both; }
+
+    @keyframes gentle-pulse {
+      0%,100% { box-shadow: 0 0 0 0   rgba(231,76,60,0.35); }
+      50%      { box-shadow: 0 0 0 8px rgba(231,76,60,0); }
+    }
+    .urgent-pulse { animation: gentle-pulse 2s ease-in-out infinite; }
+
+    .hover-lift {
+      transition: transform 0.18s cubic-bezier(0.4,0,0.2,1), box-shadow 0.18s ease;
+    }
+    .hover-lift:hover { transform: translateY(-2px); box-shadow: 0 8px 18px rgba(74,48,32,0.18); }
+
+    .btn-press { transition: all 0.12s cubic-bezier(0.4,0,0.2,1); }
+    .btn-press:active:not(:disabled) { transform: scale(0.96) translateY(2px); box-shadow: 0 2px 4px rgba(74,48,32,0.25); }
+
+    .btn-gradient { position: relative; overflow: hidden; }
+    .btn-gradient::before {
+      content: ''; position: absolute; top: 0; left: -100%;
+      width: 100%; height: 100%;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.18), transparent);
+      transition: left 0.45s ease;
+    }
+    .btn-gradient:hover::before { left: 100%; }
+
+    .emoji-hover { display: inline-block; transition: transform 0.2s ease; }
+    .emoji-hover:hover { transform: scale(1.18) rotate(6deg); }
+
+    .bg-transition { transition: background-color 0.25s ease, border-color 0.25s ease; }
+
+    .plant-item { transition: all 0.18s ease; }
+    .plant-item:hover { background: linear-gradient(135deg, #F4E4C1 0%, #F8EDD5 100%); border-color: #6B9C3D !important; transform: translateX(4px); }
+
+    @keyframes slideInLeft {
+      from { opacity: 0; transform: translateX(-16px); }
+      to   { opacity: 1; transform: translateX(0); }
+    }
+    .stagger-item { animation: slideInLeft 0.28s ease-out both; }
+    .stagger-item:nth-child(1) { animation-delay: 0.04s; }
+    .stagger-item:nth-child(2) { animation-delay: 0.09s; }
+    .stagger-item:nth-child(3) { animation-delay: 0.14s; }
+    .stagger-item:nth-child(4) { animation-delay: 0.19s; }
+    .stagger-item:nth-child(5) { animation-delay: 0.24s; }
+    .stagger-item:nth-child(n+6) { animation-delay: 0.28s; }
+
+    .status-glow { position: relative; }
+    .status-glow::after {
+      content: ''; position: absolute; top:50%; left:50%;
+      width:100%; height:100%; background: inherit; border-radius: inherit;
+      opacity: 0.25; filter: blur(14px); transform: translate(-50%,-50%);
+      z-index: -1; pointer-events: none;
+    }
+
+    @keyframes spin-plant { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+    .loading-spinner { display: inline-block; animation: spin-plant 1.4s linear infinite; }
+
+    @keyframes badge-pulse-anim {
+      0%,100% { opacity:1; transform:scale(1); }
+      50%      { opacity:.8; transform:scale(1.05); }
+    }
+    .badge-pulse { animation: badge-pulse-anim 2.2s ease-in-out infinite; }
+
+    .input-depth {
+      box-shadow: inset 0 2px 4px rgba(74,48,32,0.08), 0 0 0 4px transparent;
+      transition: box-shadow 0.2s ease;
+    }
+    .input-depth:focus {
+      box-shadow: inset 0 2px 4px rgba(74,48,32,0.08), 0 0 0 4px rgba(107,156,61,0.28);
+    }
+
+    .deco-plant { position: absolute; opacity: 0.07; pointer-events: none; font-size: 64px; animation: gentle-sway 4.5s ease-in-out infinite; }
+    @keyframes gentle-sway {
+      0%,100% { transform: rotate(-3deg) translateY(0); }
+      50%      { transform: rotate( 3deg) translateY(-6px); }
+    }
+
+    @media (max-width: 768px) { button, a, [role="button"] { min-height: 44px; } }
+
+  </style>
+</head>
+<body>
+<div id="root"></div>
+
+<script>
+  const __BOOT_JSON__ = `<?= JSON.stringify({ baseUrl:(baseUrl||''), mode:(mode||'home'), uid:(uid||''), loc:(loc||''), openAdd:(openAdd||'') }) ?>`;
+  window.PLANTOS_BOOT = (function(){ try { return JSON.parse(__BOOT_JSON__); } catch(e){ return {}; } })();
+
+  // ── Measure true available height and stamp it on #root ──
+  // This defeats the GAS banner: the banner lives ABOVE the iframe,
+  // so window.innerHeight inside the iframe is already the correct usable height.
+  // We just need to apply it explicitly so CSS percentages work right.
+  function sizeRoot() {
+    var root = document.getElementById('root');
+    if (!root) return;
+
+    // Prefer visualViewport height on mobile (handles Safari/Chrome browser chrome better)
+    var h = (window.visualViewport && window.visualViewport.height) ? window.visualViewport.height : window.innerHeight;
+
+    root.style.height = h + 'px';
+    root.style.maxHeight = h + 'px';
+
+    // In some Apps Script container contexts (sidebar/dialog), setHeight may exist. Guard it safely.
+    try {
+      if (window.google && google.script && google.script.host && typeof google.script.host.setHeight === 'function') {
+        google.script.host.setHeight(h);
+      }
+    } catch (e) {}
+  }
+  // Run immediately, then on every resize/orientation change
+  document.addEventListener('DOMContentLoaded', sizeRoot);
+  window.addEventListener('resize', sizeRoot);
+  window.addEventListener('orientationchange', function(){ setTimeout(sizeRoot, 250); });
+  // Run now too in case DOMContentLoaded already fired
+  if (document.readyState !== 'loading') sizeRoot();
+</script>
+
+<script type="text/babel">
+const { useState, useEffect, useRef, createContext, useContext, useMemo } = React;
+const BOOT = window.PLANTOS_BOOT || {};
+const HAS_GAS = !!(window.google && google.script && google.script.run);
+const DEMO_MODE = !HAS_GAS;
+
+function gasCall(fn, ...args) {
+  return new Promise((resolve, reject) => {
+    if (!(window.google && google.script && google.script.run)) {
+      reject(new Error("Apps Script runtime unavailable"));
+      return;
+    }
+    if (typeof google.script.run[fn] !== "function") {
+      reject(new Error(`Backend function not available: ${fn}`));
+      return;
+    }
+    google.script.run
+      .withSuccessHandler(resolve)
+      .withFailureHandler((err) => reject(new Error((err && err.message) || String(err))))[fn](...args);
+  });
+}
+
+function useScreenSize() {
+  const measure = () => {
+    const w = window.innerWidth, h = window.innerHeight;
+    return { w, h, isSmall: w < 480, isMobile: w < 768, isTablet: w >= 768 && w < 1024, isDesktop: w >= 1024 };
+  };
+  const [screenSize, setScreenSize] = useState(measure);
+  useEffect(() => {
+    const on = () => setScreenSize(measure());
+    window.addEventListener('resize', on);
+    window.addEventListener('orientationchange', on);
+    return () => { window.removeEventListener('resize', on); window.removeEventListener('orientationchange', on); };
+  }, []);
+  return screenSize;
+}
+
+function format12h(date) {
+  return date.toLocaleString('en-US', {
+    weekday:'short', month:'short', day:'numeric',
+    hour:'numeric', minute:'2-digit', second:'2-digit',
+    hour12:true
+  });
+}
+
+function safeUid(raw) {
+  const s = String(raw ?? '').trim();
+  if (!s) return '';
+  const low = s.toLowerCase();
+  if (low === 'undefined' || low === 'null' || low === 'nan') return '';
+  return s;
+}
+
+/* ===================== DEMO MODE ===================== */
+const DEMO_SEED = {"locations": ["Bedroom 1", "Bedroom 2", "Kitchen", "Living Room", "Plant Hotel"], "plants": [{"uid": "69000001", "nickname": "Glorio", "genus": "Philodendron", "taxon": "gloriosum", "species": "gloriosum", "classification": "Araceae", "location": "Bedroom 1", "substrate": "Semi-hydro (PON)", "medium": "Semi-hydro (PON)", "potSize": "6\"", "birthday": "2025-08-12", "everyDays": "10", "fertilizeEveryDays": "30", "lastWatered": "2026-02-17", "lastFertilized": "2026-02-13", "lastRepotted": "2025-10-31", "notes": ""}, {"uid": "69000002", "nickname": "Dragon Scale", "genus": "Alocasia", "taxon": "baginda", "species": "baginda", "classification": "Araceae", "location": "Bedroom 1", "substrate": "Semi-hydro (LECA)", "medium": "Semi-hydro (LECA)", "potSize": "4\"", "birthday": "2025-08-12", "everyDays": "7", "fertilizeEveryDays": "21", "lastWatered": "2026-02-25", "lastFertilized": "2026-02-18", "lastRepotted": "2025-10-31", "notes": ""}, {"uid": "69000003", "nickname": "", "genus": "Monstera", "taxon": "deliciosa", "species": "deliciosa", "classification": "Araceae", "location": "Bedroom 2", "substrate": "Soil mix", "medium": "Soil mix", "potSize": "8\"", "birthday": "2025-08-12", "everyDays": "12", "fertilizeEveryDays": "30", "lastWatered": "2026-02-14", "lastFertilized": "2026-02-13", "lastRepotted": "2025-10-31", "notes": ""}, {"uid": "69000004", "nickname": "", "genus": "Ficus", "taxon": "elastica", "species": "elastica", "classification": "Moraceae", "location": "Bedroom 2", "substrate": "Soil mix", "medium": "Soil mix", "potSize": "6\"", "birthday": "2025-08-12", "everyDays": "14", "fertilizeEveryDays": "45", "lastWatered": "2026-02-22", "lastFertilized": "2026-02-06", "lastRepotted": "2025-10-31", "notes": ""}, {"uid": "69000005", "nickname": "", "genus": "Hoya", "taxon": "carnosa", "species": "carnosa", "classification": "Apocynaceae", "location": "Living Room", "substrate": "Semi-hydro (PON)", "medium": "Semi-hydro (PON)", "potSize": "4\"", "birthday": "2025-08-12", "everyDays": "10", "fertilizeEveryDays": "30", "lastWatered": "2026-02-19", "lastFertilized": "2026-02-13", "lastRepotted": "2025-10-31", "notes": ""}, {"uid": "69000006", "nickname": "", "genus": "Sansevieria", "taxon": "trifasciata", "species": "trifasciata", "classification": "Asparagaceae", "location": "Living Room", "substrate": "Mineral mix", "medium": "Mineral mix", "potSize": "6\"", "birthday": "2025-08-12", "everyDays": "21", "fertilizeEveryDays": "60", "lastWatered": "2026-02-08", "lastFertilized": "2026-01-29", "lastRepotted": "2025-10-31", "notes": ""}, {"uid": "69000007", "nickname": "", "genus": "Pothos", "taxon": "aureum", "species": "aureum", "classification": "Araceae", "location": "Kitchen", "substrate": "Water / hydro", "medium": "Water / hydro", "potSize": "5\"", "birthday": "2025-08-12", "everyDays": "7", "fertilizeEveryDays": "21", "lastWatered": "2026-02-20", "lastFertilized": "2026-02-18", "lastRepotted": "2025-10-31", "notes": ""}, {"uid": "69000008", "nickname": "Pebble Boy", "genus": "Lithops", "taxon": "karasmontana", "species": "karasmontana", "classification": "Aizoaceae", "location": "Plant Hotel", "substrate": "Mineral mix", "medium": "Mineral mix", "potSize": "3\"", "birthday": "2025-08-12", "everyDays": "30", "fertilizeEveryDays": "90", "lastWatered": "2026-01-26", "lastFertilized": "2026-01-14", "lastRepotted": "2025-10-31", "notes": ""}, {"uid": "69000009", "nickname": "Cactus Chad", "genus": "Cereus", "taxon": "peruvianus", "species": "peruvianus", "classification": "Cactaceae", "location": "Plant Hotel", "substrate": "Mineral mix", "medium": "Mineral mix", "potSize": "6\"", "birthday": "2025-08-12", "everyDays": "21", "fertilizeEveryDays": "60", "lastWatered": "2026-02-18", "lastFertilized": "2026-01-29", "lastRepotted": "2025-10-31", "notes": ""}]};
+
+function demoIso_(d) {
+  const z = (n) => String(n).padStart(2,'0');
+  return `${d.getFullYear()}-${z(d.getMonth()+1)}-${z(d.getDate())}`;
+}
+function demoAddDays_(isoStr, days) {
+  const d = new Date(String(isoStr||'').trim());
+  if (isNaN(d)) return '';
+  d.setDate(d.getDate() + (Number(days)||0));
+  return demoIso_(d);
+}
+function demoPrimary_(p) {
+  const nn = String(p.nickname||'').trim();
+  if (nn) return nn;
+  const g = String(p.genus||'').trim();
+  const t = String(p.species||p.taxon||'').trim();
+  const s = (g && t) ? `${g} ${t}` : (g || t || p.uid);
+  return cleanDisplayName(s);
+}
+function demoRecomputeDue_(p) {
+  const every = Number(p.everyDays||0);
+  if (!every || !p.lastWatered) return '';
+  return demoAddDays_(p.lastWatered, every);
+}
+function demoRecomputeFertDue_(p) {
+  const every = Number(p.fertilizeEveryDays||0);
+  if (!every || !p.lastFertilized) return '';
+  return demoAddDays_(p.lastFertilized, every);
+}
+function demoNowStamp_() {
+  const d = new Date();
+  const pad = (n)=>String(n).padStart(2,'0');
+  return `${demoIso_(d)} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+// Legacy alias used internally
+function cleanDisplayName_(s){ return cleanDisplayName(s); }
+
+function normStr(v){ return String(v || '').trim().toLowerCase(); }
+
+function cleanDisplayName(s){
+  const raw = String(s || '').trim();
+  if (!raw) return '';
+  const parts = raw.split(/\s+/);
+  const out = [];
+  for (let i=0;i<parts.length;i++){
+    const w = parts[i];
+    if (!w) continue;
+    if (out.length && out[out.length-1].toLowerCase() === w.toLowerCase()) continue;
+    out.push(w);
+  }
+  return out.join(' ').replace(/\s{2,}/g,' ').trim();
+}
+
+function getTaxLine(plant){
+  if (!plant) return '';
+  const gs = String(plant.gs || '').trim();
+  const cls = String(plant.classification || '').trim();
+  const genus = String(plant.genus || '').trim();
+  const taxon = String(plant.species || plant.taxon || '').trim();
+  if (gs && /\s/.test(gs)) return gs;
+  if (cls && /\s/.test(cls)) return cls;
+  const combo = [genus, taxon].filter(Boolean).join(' ').trim();
+  if (combo && /\s/.test(combo)) return combo;
+  return gs || combo || cls || '';
+}
+
+/* ===================== NAV ===================== */
+const NavigationContext = createContext(undefined);
+
+function parseStartRouteFromBoot(){
+  const openAdd = String(BOOT.openAdd || '').trim().toLowerCase();
+  if (openAdd === '1' || openAdd === 'true' || openAdd === 'add') return { screen:'add', params:{} };
+  const modeLower = String(BOOT.mode || '').trim().toLowerCase();
+  const uid = safeUid(BOOT.uid);
+  if (uid && modeLower === 'plant') return { screen:'plant', params:{ uid } };
+  const modeMap = {
+    home:'home', plant:'plant', add:'add', 'my-plants':'my-plants', plants:'my-plants',
+    locations:'my-plants', watering:'watering', 'quick-log':'quick-log', quicklog:'quick-log',
+    'plant-log':'plant-log', log:'plant-log', spec:'spec',
+    'batch-water':'batch-water', 'batch-fertilize':'batch-fertilize'
+  };
+  const scr = modeMap[modeLower] || 'home';
+  return { screen: scr, params: (scr === 'plant' && uid) ? { uid } : {} };
+}
+
+function NavigationProvider({ children }) {
+  const startRoute = useMemo(() => parseStartRouteFromBoot(), []);
+  const [route, setRoute] = useState(startRoute);
+  const [history, setHistory] = useState([startRoute]);
+
+  useEffect(() => {
+    try {
+      if (!(window.google && google.script && google.script.url && typeof google.script.url.getLocation === 'function')) return;
+      google.script.url.getLocation((loc) => {
+        try {
+          const p = (loc && loc.parameter) ? loc.parameter : {};
+          const modeRaw = String(p.mode || '').trim();
+          const uidParam = safeUid(p.uid);
+          let uidFromMode = '';
+          const m = modeRaw.match(/^uid(\d+)$/i);
+          if (m && m[1]) uidFromMode = m[1];
+          const finalUid = uidParam || uidFromMode;
+          if (finalUid) { const next = { screen:'plant', params:{ uid: finalUid } }; setRoute(next); setHistory([next]); return; }
+          const ml = modeRaw.toLowerCase();
+          if (ml === 'locations' || ml === 'plants' || ml === 'my-plants') { const next = { screen:'my-plants', params:{} }; setRoute(next); setHistory([next]); return; }
+        } catch(e){}
+      });
+    } catch(e){}
+  }, []);
+
+  const navigate = (screen, params={}) => {
+    const next = { screen, params: params || {} };
+    setRoute(next);
+    setHistory(prev => [...prev, next]);
+  };
+
+  const goBack = () => {
+    setHistory(prev => {
+      if (prev.length <= 1) return prev;
+      const h = prev.slice(0, prev.length - 1);
+      const last = h[h.length - 1];
+      setRoute(last);
+      return h;
+    });
+  };
+
+  return (
+    <NavigationContext.Provider value={{ route, navigate, goBack, canGoBack: history.length > 1 }}>
+      {children}
+    </NavigationContext.Provider>
+  );
+}
+
+function useNavigation() {
+  const ctx = useContext(NavigationContext);
+  if (!ctx) throw new Error('useNavigation must be used within NavigationProvider');
+  return ctx;
+}
+
+/* ===================== DATA ===================== */
+const PlantDataContext = createContext(undefined);
+
+function PlantDataProvider({ children }) {
+  const [locations, setLocations] = useState([]);
+  const [homeData, setHomeData] = useState(null);
+
+  const [demoPlants, setDemoPlants] = useState(() => {
+    return (DEMO_SEED.plants || []).map(p => {
+      const gs = cleanDisplayName(`${p.genus || ''} ${p.species || p.taxon || ''}`.trim());
+      const due = demoRecomputeDue_(p);
+      return { ...p, gs, primary: demoPrimary_(p), due: due || '' };
+    });
+  });
+  const [demoPhotoMap, setDemoPhotoMap] = useState(() => ({}));
+  const [demoTimelineMap, setDemoTimelineMap] = useState(() => ({}));
+  const [demoHomeData, setDemoHomeData] = useState(() => null);
+
+  const demoRebuildHome_ = (plantsList) => {
+    const today = new Date(); today.setHours(0,0,0,0);
+    const in7 = new Date(today); in7.setDate(in7.getDate() + 7);
+
+    const dueNow = [], upcoming = [];
+    const fertDueNow = [], fertUpcoming = [];
+    const bothDueNow = [], bothUpcoming = [];
+    const birthdays = [];
+
+    const parseDay = (iso) => {
+      const d = new Date(String(iso || '').trim());
+      if (isNaN(d)) return null;
+      d.setHours(0,0,0,0);
+      return d;
+    };
+
+    (plantsList || []).forEach(p => {
+      const primary = p.primary || demoPrimary_(p);
+
+      // Water due
+      const waterDueStr = String(p.due || '').trim();
+      const waterDueDate = waterDueStr ? parseDay(waterDueStr) : null;
+      let waterBucket = '';
+      if (waterDueDate) {
+        if (waterDueDate <= today) {
+          waterBucket = 'now';
+          dueNow.push({ uid: p.uid, primary, due: waterDueStr });
+        } else if (waterDueDate <= in7) {
+          waterBucket = 'upcoming';
+          upcoming.push({ uid: p.uid, primary, due: waterDueStr });
+        }
+      }
+
+      // Fert due
+      const fertDueStr = String(demoRecomputeFertDue_(p) || '').trim();
+      const fertDueDate = fertDueStr ? parseDay(fertDueStr) : null;
+      let fertBucket = '';
+      if (fertDueDate) {
+        if (fertDueDate <= today) {
+          fertBucket = 'now';
+          fertDueNow.push({ uid: p.uid, primary, due: fertDueStr });
+        } else if (fertDueDate <= in7) {
+          fertBucket = 'upcoming';
+          fertUpcoming.push({ uid: p.uid, primary, due: fertDueStr });
+        }
+      }
+
+      // Both (within 7 days for both)
+      if (waterBucket && fertBucket) {
+        const item = { uid: p.uid, primary, waterDue: waterDueStr || '', fertDue: fertDueStr || '' };
+        if (waterBucket === 'now' && fertBucket === 'now') bothDueNow.push(item);
+        else bothUpcoming.push(item);
+      }
+
+      const b = String(p.birthday || '').trim();
+      if (b) birthdays.push(primary);
+    });
+
+    dueNow.sort((a,b) => String(a.due).localeCompare(String(b.due)));
+    upcoming.sort((a,b) => String(a.due).localeCompare(String(b.due)));
+    fertDueNow.sort((a,b) => String(a.due).localeCompare(String(b.due)));
+    fertUpcoming.sort((a,b) => String(a.due).localeCompare(String(b.due)));
+    bothDueNow.sort((a,b) => (String(a.waterDue||'') + '|' + String(a.fertDue||'')).localeCompare(String(b.waterDue||'') + '|' + String(b.fertDue||'')));
+    bothUpcoming.sort((a,b) => (String(a.waterDue||'') + '|' + String(a.fertDue||'')).localeCompare(String(b.waterDue||'') + '|' + String(b.fertDue||'')));
+
+    return {
+      dueNow,
+      upcoming,
+      fertDueNow,
+      fertUpcoming,
+      bothDueNow,
+      bothUpcoming,
+      birthdays: birthdays.slice(0, 3),
+      totalCount: (plantsList || []).length
+    };
+  };
+
+  useEffect(() => {
+    if (DEMO_MODE) { setDemoHomeData(demoRebuildHome_(demoPlants)); return; }
+    gasCall('plantosListLocations').then(setLocations).catch(() => setLocations([]));
+    gasCall('plantosHome').then(setHomeData).catch(() => setHomeData(null));
+  }, []);
+
+  useEffect(() => {
+    if (!DEMO_MODE) return;
+    setDemoHomeData(demoRebuildHome_(demoPlants));
+  }, [demoPlants]);
+
+  const refreshHome = async () => {
+    if (DEMO_MODE) { const d = demoRebuildHome_(demoPlants); setDemoHomeData(d); return d; }
+    const d = await gasCall('plantosHome');
+    setHomeData(d);
+    return d;
+  };
+
+  const demoFind_ = (uid) => (demoPlants || []).find(p => String(p.uid) === String(uid));
+  const demoSetPlant_ = (uid, patch) => {
+    setDemoPlants(prev => (prev || []).map(p => {
+      if (String(p.uid) !== String(uid)) return p;
+      const next = { ...p, ...(patch || {}) };
+      next.primary = demoPrimary_(next);
+      if (patch && (patch.everyDays || patch.lastWatered || patch.recomputeDue)) {
+        next.due = demoRecomputeDue_(next) || next.due || '';
+      }
+      return next;
+    }));
+  };
+  const demoPushLog_ = (uid, action, details) => {
+    const item = { uid: String(uid), ts: demoNowStamp_(), action, details: String(details || '').trim() };
+    setDemoTimelineMap(prev => {
+      const next = { ...(prev || {}) };
+      const arr = Array.isArray(next[uid]) ? next[uid].slice() : [];
+      arr.unshift(item);
+      next[uid] = arr.slice(0, 60);
+      return next;
+    });
+  };
+
+  const getPlantsByLocation = (location) => {
+    if (DEMO_MODE) {
+      const loc = String(location || '').trim();
+      return Promise.resolve((demoPlants || []).filter(p => String(p.location || '') === loc));
+    }
+    return gasCall('plantosGetPlantsByLocation', location);
+  };
+
+  const getPlant = (uid) => {
+    if (DEMO_MODE) {
+      const p = demoFind_(uid);
+      return Promise.resolve(p ? { ...p } : null);
+    }
+    return gasCall('plantosGetPlant', uid).then(res => (res && res.ok ? res.plant : null));
+  };
+
+  const setNickname = (uid, nickname) => {
+    if (DEMO_MODE) {
+      demoSetPlant_(uid, { nickname: String(nickname || '').trim() });
+      demoPushLog_(uid, 'UPDATE', `Nickname: ${String(nickname || '').trim()}`);
+      return Promise.resolve({ ok: true });
+    }
+    return gasCall('plantosSetNickname', uid, nickname);
+  };
+
+  const createPlant = (payload) => {
+    if (DEMO_MODE) {
+      const maxUid = (demoPlants || []).reduce((m,p)=>Math.max(m, Number(p.uid)||0), 69000000);
+      const uid = String(maxUid + 1).padStart(8,'0');
+      const g = String(payload.genus || '').trim();
+      const t = String(payload.taxon || '').trim();
+      const p = {
+        uid, nickname: String(payload.nickname || '').trim(), genus: g, taxon: t, species: t,
+        classification: String(payload.classification || '').trim(),
+        location: String(payload.location || '').trim(),
+        substrate: String(payload.medium || payload.substrate || '').trim(),
+        medium: String(payload.medium || payload.substrate || '').trim(),
+        potSize: String(payload.potSize || '').trim(),
+        birthday: String(payload.birthday || '').trim(),
+        everyDays: String(payload.everyDays || '').trim(),
+        fertilizeEveryDays: String(payload.fertilizeEveryDays || '').trim(),
+        lastWatered: '', lastFertilized: '', lastRepotted: '', notes: ''
+      };
+      p.gs = cleanDisplayName(`${p.genus} ${p.species}`.trim());
+      p.primary = demoPrimary_(p);
+      p.due = demoRecomputeDue_(p) || '';
+      setDemoPlants(prev => [p, ...(prev || [])]);
+      demoPushLog_(uid, 'CREATE', 'Created');
+      return Promise.resolve({ ok: true, uid });
+    }
+    return gasCall('plantosCreatePlant', payload);
+  };
+
+  const updatePlant = (uid, patch) => {
+    if (DEMO_MODE) {
+      demoSetPlant_(uid, patch || {});
+      demoPushLog_(uid, 'UPDATE', Object.keys(patch || {}).join(', '));
+      return Promise.resolve({ ok: true });
+    }
+    return gasCall('plantosUpdatePlant', uid, patch || {});
+  };
+
+  const quickLog = (uid, payload) => {
+    if (DEMO_MODE) {
+      const p = demoFind_(uid);
+      if (!p) return Promise.resolve({ ok: false });
+      const notes = String(payload && payload.notes ? payload.notes : '').trim();
+      if (payload && payload.water) {
+        const today = demoIso_(new Date());
+        demoSetPlant_(uid, { lastWatered: today, due: demoAddDays_(today, Number(p.everyDays||0)) });
+        demoPushLog_(uid, 'WATER', notes || 'Watered');
+      }
+      if (payload && payload.fertilize) {
+        const today = demoIso_(new Date());
+        demoSetPlant_(uid, { lastFertilized: today });
+        demoPushLog_(uid, 'FERTILIZE', notes || 'Fertilized');
+      }
+      if (payload && payload.repot) {
+        const today = demoIso_(new Date());
+        demoSetPlant_(uid, { lastRepotted: today, potSize: payload.potSize || p.potSize, substrate: payload.substrate || p.substrate, medium: payload.substrate || p.medium });
+        demoPushLog_(uid, 'REPOT', notes || 'Repotted');
+      }
+      if (payload && payload.note && !payload.water && !payload.fertilize && !payload.repot) {
+        demoPushLog_(uid, 'NOTE', notes || 'Note');
+      }
+      if (!payload.water && !payload.fertilize && !payload.repot && notes) {
+        demoPushLog_(uid, 'NOTE', notes);
+      }
+      return Promise.resolve({ ok: true });
+    }
+    return gasCall('plantosQuickLog', uid, payload || {});
+  };
+
+  const batchWater = (uids, actionLabel) => {
+    if (DEMO_MODE) {
+      const label = String(actionLabel || 'Watered');
+      (uids || []).forEach(uid => quickLog(uid, { water: true, fertilize: false, repot: false, notes: label }));
+      return Promise.resolve({ ok: true });
+    }
+    return gasCall('plantosBatchWater', uids || [], actionLabel || '');
+  };
+
+  const batchFertilize = (uids, actionLabel) => {
+    if (DEMO_MODE) {
+      const label = String(actionLabel || 'Fertilized');
+      (uids || []).forEach(uid => quickLog(uid, { water: false, fertilize: true, repot: false, notes: label }));
+      return Promise.resolve({ ok: true });
+    }
+    return gasCall('plantosBatchFertilize', uids || [], actionLabel || '');
+  };
+
+  const getRecentLog = (limit) => {
+    if (DEMO_MODE) {
+      const all = [];
+      Object.keys(demoTimelineMap || {}).forEach(uid => { (demoTimelineMap[uid] || []).forEach(it => all.push(it)); });
+      all.sort((a,b) => String(b.ts).localeCompare(String(a.ts)));
+      return Promise.resolve(all.slice(0, Number(limit) || 25));
+    }
+    return gasCall('plantosGetRecentLog', limit || 25);
+  };
+
+  const getTimeline = (uid, limit) => {
+    if (DEMO_MODE) {
+      const arr = (demoTimelineMap && demoTimelineMap[String(uid)]) ? demoTimelineMap[String(uid)] : [];
+      return Promise.resolve(arr.slice(0, Number(limit) || 30));
+    }
+    return gasCall('plantosGetTimeline', uid, limit || 30);
+  };
+
+  const search = (q, limit) => {
+    if (DEMO_MODE) {
+      const qq = String(q || '').trim().toLowerCase();
+      if (!qq) return Promise.resolve([]);
+      const out = (demoPlants || []).filter(p => {
+        const blob = [p.uid, p.nickname, p.primary, p.genus, p.species, p.taxon, p.classification, p.location, p.substrate, p.medium, p.gs].join(' ').toLowerCase();
+        return blob.includes(qq);
+      });
+      return Promise.resolve(out.slice(0, Number(limit) || 15));
+    }
+    return gasCall('plantosSearch', q, limit || 15);
+  };
+
+  const getLatestPhoto = (uid) => {
+    if (DEMO_MODE) {
+      const ph = demoPhotoMap[String(uid)];
+      if (ph) return Promise.resolve({ ok: true, photo: ph });
+      return Promise.resolve({ ok: false });
+    }
+    return gasCall('plantosGetLatestPhoto', uid);
+  };
+
+  const uploadPlantPhoto = (uid, dataUrl, originalName) => {
+    if (DEMO_MODE) {
+      const du = String(dataUrl || '');
+      setDemoPhotoMap(prev => ({ ...(prev || {}), [String(uid)]: { thumbUrl: du, viewUrl: du, name: originalName || 'photo' } }));
+      demoPushLog_(uid, 'UPDATE', 'Photo added');
+      return Promise.resolve({ ok: true });
+    }
+    return gasCall('plantosUploadPlantPhoto', uid, dataUrl, originalName);
+  };
+
+  const ctxValue = DEMO_MODE ? {
+    locations: DEMO_SEED.locations || [], homeData: demoHomeData, refreshHome,
+    getPlantsByLocation, getPlant, getTimeline, getRecentLog,
+    createPlant, updatePlant, setNickname,
+    quickLog, batchWater, batchFertilize, search, getLatestPhoto, uploadPlantPhoto
+  } : {
+    locations, homeData, refreshHome, getPlantsByLocation, getPlant, setNickname,
+    createPlant, updatePlant, quickLog, batchWater, batchFertilize,
+    getRecentLog, getTimeline, search, getLatestPhoto, uploadPlantPhoto
+  };
+
+  return <PlantDataContext.Provider value={ctxValue}>{children}</PlantDataContext.Provider>;
+}
+
+function usePlantData() {
+  const ctx = useContext(PlantDataContext);
+  if (!ctx) throw new Error('usePlantData must be used within PlantDataProvider');
+  return ctx;
+}
+
+/* ===================== UI COMPONENTS ===================== */
+function PlantButton({ children, variant='primary', onClick, disabled=false, className='' }) {
+  const base = "px-4 py-3 rounded-lg border-4 font-semibold btn-press btn-gradient";
+  const styles = {
+    primary: "bg-[#8BB55C] border-[#6B9C3D] text-[#2A4A1A] shadow hover-lift",
+    secondary: "bg-[#7BB5CC] border-[#5A8C9D] text-[#1A3A4A] shadow hover-lift",
+    ghost: "bg-transparent border-[#C8B488] text-[#4A3020] hover:bg-[#E8D4A8] bg-transition"
+  };
+  const dis = "opacity-50 cursor-not-allowed";
+  return (
+    <button type="button" onClick={onClick} disabled={disabled}
+      className={`${base} ${styles[variant]} ${disabled ? dis : 'cursor-pointer'} ${className}`}
+      style={{ fontFamily: "'Pixelify Sans', cursive" }}>
+      {children}
+    </button>
+  );
+}
+
+function PlantCard({ children, title, className='' }) {
+  return (
+    <div className={`bg-gradient-to-b from-[#F4E4C1] to-[#E8D4A8] rounded-xl border-8 border-[#6B4423] p-4 paper-texture card-depth fade-in ${className}`}>
+      {title && (
+        <h3 className="text-[#4A3020] mb-3 pb-2 border-b-4 border-[#C8B488]"
+          style={{ fontFamily: "'Press Start 2P', cursive", fontSize: '14px' }}>
+          {title}
+        </h3>
+      )}
+      {children}
+    </div>
+  );
+}
+
+function StatusMessage({ type, message }) {
+  const colors = {
+    success: 'bg-[#6B9C3D] border-[#5A8C2D] text-white',
+    error: 'bg-[#E74C3C] border-[#C0392B] text-white',
+    info: 'bg-[#3498DB] border-[#2980B9] text-white',
+    loading: 'bg-[#F39C12] border-[#E67E22] text-white'
+  };
+  const icons = { success:'✓', error:'✗', info:'ℹ', loading:<span className="loading-spinner">🌿</span> };
+  return (
+    <div className={`${colors[type]} border-4 rounded-lg px-4 py-3 mb-4 flex items-center gap-3 shadow-lg status-glow fade-in`}>
+      <span className="text-2xl">{icons[type]}</span>
+      <span style={{ fontFamily: "'Pixelify Sans', cursive", fontSize:'14px', fontWeight:'600' }}>{message}</span>
+    </div>
+  );
+}
+
+function MiniThumb({ url }) {
+  return (
+    <div className="w-[56px] h-[56px] rounded-lg border-2 border-[#6B4423] overflow-hidden bg-[#F4E4C1] flex items-center justify-center shrink-0">
+      {url
+        ? <img src={url} alt="" className="w-full h-full object-cover" />
+        : <span style={{ fontFamily:"'Pixelify Sans', cursive", fontSize:'10px', color:'#6B4423', fontWeight:900 }}>No photo</span>
+      }
+    </div>
+  );
+}
+
+/* ===================== HOME ===================== */
+function HomeScreen() {
+  const { navigate } = useNavigation();
+  const { homeData, refreshHome } = usePlantData();
+  const { isSmall, isDesktop } = useScreenSize();
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    refreshHome().catch(()=>{}).finally(() => setLoading(false));
+  }, []);
+
+  const dueNow   = (homeData && homeData.dueNow)    ? homeData.dueNow    : [];
+  const upcoming = (homeData && homeData.upcoming)  ? homeData.upcoming  : [];
+  const birthdays= (homeData && homeData.birthdays) ? homeData.birthdays : [];
+  const totalCount = (homeData && homeData.totalCount != null) ? homeData.totalCount : null;
+
+  let bannerBg='#eef9ef', bannerBorder='#6B9C3D', bannerText='#2A4A1A', bannerMsg='All plants are happy!';
+  if (dueNow.length > 0)       { bannerBg='#fde8e7'; bannerBorder='#e74c3c'; bannerText='#c0392b'; bannerMsg=`${dueNow.length} plant${dueNow.length>1?'s':''} need water NOW`; }
+  else if (upcoming.length > 0){ bannerBg='#fff8e1'; bannerBorder='#f39c12'; bannerText='#7d4e00'; bannerMsg=`${upcoming.length} plant${upcoming.length>1?'s':''} due within 7 days`; }
+
+  const pxS = { fontFamily:"'Pixelify Sans', cursive" };
+  const px8 = { fontFamily:"'Press Start 2P', cursive" };
+
+  const StatusBanner = () => (
+    loading
+      ? <div className="rounded-lg border-2 px-3 py-2 mb-3"
+          style={{ background:'#f5f5f5', borderColor:'#ccc', ...pxS, fontSize:'12px', color:'#999' }}>
+          Loading garden...
+        </div>
+      : <div className="rounded-lg border-2 px-3 py-2 mb-3"
+          style={{ background:bannerBg, borderColor:bannerBorder, ...pxS, fontSize:'13px', fontWeight:900, color:bannerText }}>
+          {bannerMsg}
+        </div>
+  );
+
+  const BirthdayBanner = () => birthdays.length > 0 ? (
+    <div className="rounded-lg border-2 border-[#ffc107] px-3 py-2 mb-3"
+      style={{ background:'#fff8e1', ...pxS, fontSize:'12px', color:'#7d4e00', fontWeight:800 }}>
+      Birthday today: {birthdays.join(', ')}
+    </div>
+  ) : null;
+
+  const DueList = () => dueNow.length > 0 ? (
+    <div className="mb-2">
+      <div style={{ ...pxS, fontSize:'11px', fontWeight:900, color:'#c0392b', marginBottom:'4px' }}>NEEDS WATER NOW</div>
+      <div className="space-y-1">
+        {dueNow.slice(0, isDesktop ? 12 : 6).map(p => (
+          <div key={p.uid}
+            onClick={() => navigate('plant', { uid: p.uid })}
+            className="flex justify-between items-center bg-white rounded-lg border-2 border-[#e74c3c] px-3 py-1 cursor-pointer plant-item urgent-pulse">
+            <span style={{ ...pxS, fontSize:'12px', fontWeight:900, color:'#4A3020' }}>{p.primary}</span>
+            <span style={{ ...pxS, fontSize:'11px', fontWeight:900, color:'#c0392b' }}>{p.due}</span>
+          </div>
+        ))}
+        {dueNow.length > (isDesktop ? 12 : 6) && (
+          <div style={{ ...pxS, fontSize:'11px', color:'#6B4423' }}>
+            +{dueNow.length - (isDesktop ? 12 : 6)} more
+          </div>
+        )}
+      </div>
+    </div>
+  ) : null;
+
+  const UpcomingList = () => dueNow.length === 0 && upcoming.length > 0 ? (
+    <div>
+      <div style={{ ...pxS, fontSize:'11px', fontWeight:900, color:'#7d4e00', marginBottom:'4px' }}>UPCOMING (7 DAYS)</div>
+      <div className="space-y-1">
+        {upcoming.slice(0, 8).map(p => (
+          <div key={p.uid}
+            onClick={() => navigate('plant', { uid: p.uid })}
+            className="flex justify-between items-center bg-white rounded-lg border-2 border-[#f39c12] px-3 py-1 cursor-pointer plant-item">
+            <span style={{ ...pxS, fontSize:'12px', fontWeight:900, color:'#4A3020' }}>{p.primary}</span>
+            <span style={{ ...pxS, fontSize:'11px', fontWeight:900, color:'#7d4e00' }}>{p.due}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  ) : null;
+
+  const NavButtons = () => (
+    <div className="flex flex-col gap-2">
+      {/* My Plants – big row */}
+      <button type="button" onClick={() => navigate('my-plants')}
+        className="flex items-center justify-between gap-3 py-4 px-4 rounded-xl border-4 border-[#6B9C3D] bg-[#8BB55C] shadow-lg hover:scale-105 transition-all"
+        style={{ fontFamily:"'Pixelify Sans', cursive", fontWeight:900, color:'#2A4A1A', fontSize: isSmall ? '16px' : '18px' }}>
+        <span className="flex items-center gap-3">
+          <span style={{ fontSize:'26px', lineHeight:1 }}>🌿</span>My Plants
+        </span>
+        <span style={{ fontSize:'18px', opacity:0.7 }}>›</span>
+      </button>
+
+      {/* Watering + Quick Log */}
+      <div className="grid grid-cols-2 gap-2">
+        <button type="button" onClick={() => navigate('watering')}
+          className="flex flex-col items-center justify-center py-4 rounded-xl border-4 border-[#4A7A1A] bg-[#6B9C3D] shadow-lg hover:scale-105 transition-all"
+          style={{ fontFamily:"'Pixelify Sans', cursive", fontWeight:900, color:'#fff', fontSize:'14px' }}>
+          <span style={{ fontSize:'28px', lineHeight:1, marginBottom:'4px' }}>💧</span>Watering
+        </button>
+        <button type="button" onClick={() => navigate('quick-log')}
+          className="flex flex-col items-center justify-center py-4 rounded-xl border-4 border-[#5A8C9D] bg-[#7BB5CC] shadow-lg hover:scale-105 transition-all"
+          style={{ fontFamily:"'Pixelify Sans', cursive", fontWeight:900, color:'#1A3A4A', fontSize:'14px' }}>
+          <span style={{ fontSize:'28px', lineHeight:1, marginBottom:'4px' }}>⚡</span>Quick Log
+        </button>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        <PlantButton onClick={() => navigate('add')}>➕ Add Plant</PlantButton>
+        <PlantButton variant="secondary" onClick={() => navigate('plant-log')}>📋 Activity Log</PlantButton>
+      </div>
+      <PlantButton variant="ghost" onClick={() => navigate('spec')} className="w-full">📖 Spec</PlantButton>
+    </div>
+  );
+
+  const pad = isSmall ? 'p-3' : isDesktop ? 'p-6' : 'p-4';
+  const maxW = isDesktop ? '1200px' : '680px';
+
+  if (isDesktop) {
+    return (
+      <div className={`flex flex-col ${pad} w-full pb-4 fade-in`}
+        style={{ maxWidth: maxW, margin: '0 auto' }}>
+        {/* Header */}
+        <div className="flex items-center justify-between mb-4">
+          <h2 style={{ ...px8, fontSize:'18px', color:'#4A3020' }}>🌿 PlantOS</h2>
+          <div className="flex items-center gap-3">
+            {DEMO_MODE && (
+              <div className="px-3 py-1 rounded-lg border-2 border-[#C0392B] bg-white badge-pulse"
+                style={{ ...pxS, fontSize:'12px', fontWeight:900, color:'#C0392B' }}>DEMO MODE</div>
+            )}
+            {totalCount != null && (
+              <div className="px-3 py-1 rounded-lg border-2 border-[#6B9C3D] bg-white"
+                style={{ ...pxS, fontSize:'14px', fontWeight:900, color:'#2A4A1A' }}>{totalCount} plants</div>
+            )}
+          </div>
+        </div>
+        {/* 2-col layout */}
+        <div className="grid grid-cols-2 gap-5">
+          <PlantCard>
+            <StatusBanner />
+            <BirthdayBanner />
+            <DueList />
+            <UpcomingList />
+          </PlantCard>
+          <PlantCard title="NAVIGATE">
+            <NavButtons />
+          </PlantCard>
+        </div>
+      </div>
+    );
+  }
+
+  /* ── MOBILE / TABLET ── */
+  return (
+    <div className={`flex flex-col ${pad} w-full pb-4 fade-in`}
+      style={{ maxWidth: maxW, margin: '0 auto' }}>
+      <PlantCard className="mb-3">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <h2 style={{ ...px8, fontSize: isSmall ? '12px' : '14px', color:'#4A3020' }}>🌿 PlantOS</h2>
+            {DEMO_MODE && (
+              <div className="px-2 py-1 rounded-lg border-2 border-[#C0392B] bg-white badge-pulse"
+                style={{ ...pxS, fontSize:'10px', fontWeight:900, color:'#C0392B' }}>DEMO</div>
+            )}
+          </div>
+          {totalCount != null && (
+            <div className="px-2 py-1 rounded-lg border-2 border-[#6B9C3D] bg-white"
+              style={{ ...pxS, fontSize:'12px', fontWeight:900, color:'#2A4A1A' }}>{totalCount} plants</div>
+          )}
+        </div>
+        <StatusBanner />
+        <BirthdayBanner />
+        <DueList />
+        <UpcomingList />
+      </PlantCard>
+      <NavButtons />
+    </div>
+  );
+}
+
+
+/* ===================== WATERING ===================== */
+function WateringScreen() {
+  const { goBack } = useNavigation();
+  const { homeData, refreshHome, batchWater, batchFertilize, locations, getPlant } = usePlantData();
+  const { isSmall, isDesktop } = useScreenSize();
+
+  const [tab, setTab] = useState('water'); // water | fert | both
+  const [selected, setSelected] = useState({});
+  const [status, setStatus] = useState(null);
+
+  // Filters
+  const [locFilter, setLocFilter] = useState('');        // '' = All
+  const [subPreset, setSubPreset] = useState('');        // '' = All
+  const [subContains, setSubContains] = useState('');    // free-text contains
+  const [metaByUid, setMetaByUid] = useState({});        // uid -> { location, subText }
+  const [metaLoading, setMetaLoading] = useState(false);
+
+  const SUB_PRESETS = useMemo(() => ([
+    { label:'All',        key:'',          aliases:[] },
+    { label:'Semi-Hydro', key:'semihydro', aliases:['semi hydro','semi-hydro','semihydro','pon','leca','hydroton','expanded clay','clay ball','stratum','fluval stratum','lava rock','pumice','perlite','zeolite'] },
+    { label:'Soil',       key:'soil',      aliases:['soil','potting','potting mix','mix','soil mix','promix','peat','peat moss','compost','worm cast','castings','manure','humus'] },
+    { label:'Coco',       key:'coco',      aliases:['coco','coir','coconut','coconut coir'] },
+    { label:'Bark',       key:'bark',      aliases:['bark','orchid','orchid bark','pine bark','fir bark','chunk','chunks'] },
+    { label:'Mineral',    key:'mineral',   aliases:['mineral','pumice','perlite','lava','lava rock','scoria','grit','sand','akadama','kanuma','zeolite','diatomite','calcined clay','turface'] },
+  ]), []);
+
+  const pxS = { fontFamily:"'Pixelify Sans', cursive" };
+  const px8S = { fontFamily:"'Press Start 2P', cursive", fontSize:'10px' };
+
+  function normalizeSubText(p) {
+    const a = String((p && p.substrate) ? p.substrate : '').trim();
+    const b = String((p && p.medium) ? p.medium : '').trim();
+    return (a + ' ' + b).trim().toLowerCase();
+  }
+
+  // DEMO: preload metadata instantly from the seed.
+  useEffect(() => {
+    if (!DEMO_MODE) return;
+    try {
+      const map = {};
+      (DEMO_SEED && DEMO_SEED.plants ? DEMO_SEED.plants : []).forEach(p => {
+        const uid = String(p && p.uid ? p.uid : '').trim();
+        if (!uid) return;
+        map[uid] = { location: String(p.location || '').trim(), subText: normalizeSubText(p) };
+      });
+      setMetaByUid(map);
+    } catch (e) {}
+  }, []);
+
+  useEffect(() => { refreshHome().catch(()=>{}); }, []);
+  useEffect(() => { setSelected({}); setStatus(null); }, [tab]);
+
+  const waterNow = (homeData && homeData.dueNow) ? homeData.dueNow : [];
+  const waterUpcoming = (homeData && homeData.upcoming) ? homeData.upcoming : [];
+
+  const fertNow = (homeData && homeData.fertDueNow) ? homeData.fertDueNow : [];
+  const fertUpcoming = (homeData && homeData.fertUpcoming) ? homeData.fertUpcoming : [];
+
+  const bothNow = (homeData && homeData.bothDueNow) ? homeData.bothDueNow : [];
+  const bothUpcoming = (homeData && homeData.bothUpcoming) ? homeData.bothUpcoming : [];
+
+  const fertDueByUid = useMemo(() => {
+    const m = {};
+    [...fertNow, ...fertUpcoming].forEach(x => { if (x && x.uid) m[String(x.uid)] = String(x.due || '').trim(); });
+    return m;
+  }, [fertNow, fertUpcoming]);
+
+  const waterDueByUid = useMemo(() => {
+    const m = {};
+    [...waterNow, ...waterUpcoming].forEach(x => { if (x && x.uid) m[String(x.uid)] = String(x.due || '').trim(); });
+    return m;
+  }, [waterNow, waterUpcoming]);
+
+  const fertSoonSet = useMemo(() => new Set(Object.keys(fertDueByUid)), [fertDueByUid]);
+  const waterSoonSet = useMemo(() => new Set(Object.keys(waterDueByUid)), [waterDueByUid]);
+
+  const tabLists = useMemo(() => {
+    if (tab === 'fert') return { nowList: fertNow, upcomingList: fertUpcoming };
+    if (tab === 'both') return { nowList: bothNow, upcomingList: bothUpcoming };
+    return { nowList: waterNow, upcomingList: waterUpcoming };
+  }, [tab, waterNow, waterUpcoming, fertNow, fertUpcoming, bothNow, bothUpcoming]);
+
+  const nowListRaw = tabLists.nowList || [];
+  const upcomingListRaw = tabLists.upcomingList || [];
+
+  // Load metadata (GAS) for all plants shown on this screen so filters can work reliably.
+  useEffect(() => {
+    if (DEMO_MODE) return;
+    let alive = true;
+
+    const want = Array.from(new Set(
+      [...nowListRaw, ...upcomingListRaw]
+        .map(p => String(p && p.uid ? p.uid : '').trim())
+        .filter(Boolean)
+    ));
+
+    const missing = want.filter(uid => !metaByUid[uid]);
+    if (!missing.length) return;
+
+    async function mapLimit(items, limit, fn) {
+      const out = [];
+      let idx = 0;
+      const workers = new Array(Math.min(limit, items.length)).fill(0).map(async () => {
+        while (idx < items.length) {
+          const cur = items[idx++];
+          out.push(await fn(cur));
+        }
+      });
+      await Promise.all(workers);
+      return out;
+    }
+
+    (async () => {
+      setMetaLoading(true);
+      try {
+        const pairs = await mapLimit(missing, 6, async (uid) => {
+          try {
+            const p = await getPlant(uid);
+            if (!p) return null;
+            return [String(p.uid), { location: String(p.location || '').trim(), subText: normalizeSubText(p) }];
+          } catch (e) {
+            return null;
+          }
+        });
+        if (!alive) return;
+        const patch = {};
+        (pairs || []).forEach(x => { if (x && x[0]) patch[x[0]] = x[1]; });
+        if (Object.keys(patch).length) setMetaByUid(prev => ({ ...prev, ...patch }));
+      } finally {
+        if (alive) setMetaLoading(false);
+      }
+    })();
+
+    return () => { alive = false; };
+  }, [tab, nowListRaw, upcomingListRaw]);
+
+  function matchesSubFilters(meta) {
+    if (!meta) return false;
+    const locOk = !locFilter || String(meta.location || '').trim().toLowerCase() === String(locFilter).trim().toLowerCase();
+
+    const txt = String(meta.subText || '').toLowerCase();
+    const free = String(subContains || '').trim().toLowerCase();
+
+    const preset = SUB_PRESETS.find(x => x.key === subPreset);
+    const presetOk = !subPreset || (preset ? preset.aliases.some(a => txt.includes(String(a).toLowerCase())) : true);
+    const freeOk = !free || txt.includes(free);
+
+    return locOk && presetOk && freeOk;
+  }
+
+  const filtersActive = !!(locFilter || subPreset || String(subContains || '').trim());
+
+  const nowList = useMemo(() => {
+    if (!filtersActive) return nowListRaw;
+    return (nowListRaw || []).filter(p => {
+      const uid = String(p && p.uid ? p.uid : '').trim();
+      if (!uid) return false;
+      const meta = metaByUid[uid];
+      return matchesSubFilters(meta);
+    });
+  }, [filtersActive, nowListRaw, metaByUid, locFilter, subPreset, subContains]);
+
+  const upcomingList = useMemo(() => {
+    if (!filtersActive) return upcomingListRaw;
+    return (upcomingListRaw || []).filter(p => {
+      const uid = String(p && p.uid ? p.uid : '').trim();
+      if (!uid) return false;
+      const meta = metaByUid[uid];
+      return matchesSubFilters(meta);
+    });
+  }, [filtersActive, upcomingListRaw, metaByUid, locFilter, subPreset, subContains]);
+
+  // Keep selection in sync: if filters hide a plant, drop it from selection (prevents "hidden selected" surprises).
+  useEffect(() => {
+    const visible = new Set(
+      [...nowList, ...upcomingList].map(p => String(p && p.uid ? p.uid : '').trim()).filter(Boolean)
+    );
+    setSelected(prev => {
+      const next = {};
+      Object.keys(prev || {}).forEach(uid => {
+        if (prev[uid] && visible.has(uid)) next[uid] = true;
+      });
+      return next;
+    });
+  }, [tab, nowList, upcomingList]);
+
+  const selectedUids = useMemo(() => Object.keys(selected).filter(k => selected[k]), [selected]);
+
+  function toggle(uid) {
+    const k = String(uid || '').trim();
+    if (!k) return;
+    setSelected(prev => ({ ...prev, [k]: !prev[k] }));
+  }
+
+  function selectAll(list) {
+    const all = {};
+    (list || []).forEach(p => { if (p && p.uid) all[String(p.uid)] = true; });
+    setSelected(all);
+  }
+
+  function clearAll() { setSelected({}); }
+
+  function clearFilters() {
+    setLocFilter('');
+    setSubPreset('');
+    setSubContains('');
+  }
+
+  async function applySelected() {
+    if (!selectedUids.length) return;
+    const label = tab === 'fert' ? 'Fertilized' : 'Watered';
+    const what = tab === 'fert' ? 'fertilize' : tab === 'both' ? 'water + fertilize' : 'water';
+    setStatus({ type:'loading', message:`Logging ${what}...` });
+    try {
+      if (tab === 'water') await batchWater(selectedUids, label);
+      else if (tab === 'fert') await batchFertilize(selectedUids, label);
+      else {
+        await batchWater(selectedUids, 'Watered');
+        await batchFertilize(selectedUids, 'Fertilized');
+      }
+      await refreshHome().catch(()=>{});
+      setSelected({});
+      setStatus({ type:'success', message:'Saved ✅' });
+      setTimeout(() => setStatus(null), 1100);
+    } catch (e) {
+      setStatus({ type:'error', message:'Failed' });
+      setTimeout(() => setStatus(null), 1600);
+    }
+  }
+
+  function Row({ p, bucket }) {
+    const uid = String(p && p.uid ? p.uid : '');
+    const primary = p && p.primary ? p.primary : uid;
+    const checked = !!selected[uid];
+
+    const dateStyleNow = { ...pxS, color:'#c0392b', fontWeight:900 };
+    const dateStyleUpcoming = { ...pxS, color:'#2A4A1A', fontWeight:900 };
+    const dateStyle = bucket === 'now' ? dateStyleNow : dateStyleUpcoming;
+
+    const otherHint = (() => {
+      if (!uid) return '';
+      if (tab === 'water' && fertSoonSet.has(uid)) return `🌾 due ${fertDueByUid[uid] || ''}`.trim();
+      if (tab === 'fert' && waterSoonSet.has(uid)) return `💧 due ${waterDueByUid[uid] || ''}`.trim();
+      return '';
+    })();
+
+    const meta = metaByUid[uid] || null;
+    const metaLine = meta
+      ? [meta.location ? `📍 ${meta.location}` : '', meta.subText ? `🧱 ${meta.subText}` : ''].filter(Boolean).join('  •  ')
+      : '';
+
+    return (
+      <div
+        className={`bg-white border-2 border-[#C8B488] rounded-lg px-3 py-2 flex items-center gap-3 ${checked ? 'ring-2 ring-[#6B9C3D]' : ''}`}
+        style={{ cursor:'pointer' }}
+        onClick={() => toggle(uid)}
+      >
+        <div className="min-w-0 flex-1">
+          <div style={{ ...pxS, fontWeight:900, color:'#4A3020' }} className="truncate">{primary}</div>
+
+          {tab !== 'both' && otherHint && (
+            <div style={{ ...pxS, fontSize:'11px', color:'#6B4423', fontWeight:800 }} className="truncate">{otherHint}</div>
+          )}
+
+          {filtersActive && metaLine && (
+            <div style={{ ...pxS, fontSize:'10px', color:'#8B6040', fontWeight:800 }} className="truncate">
+              {metaLine}
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0">
+          {tab === 'both' ? (
+            <div className="flex flex-col items-end leading-tight">
+              <div style={{ ...pxS, fontSize:'11px', fontWeight:900, color:'#2A4A1A' }}>💧 {p.waterDue || '—'}</div>
+              <div style={{ ...pxS, fontSize:'11px', fontWeight:900, color:'#7d4e00' }}>🌾 {p.fertDue || '—'}</div>
+            </div>
+          ) : (
+            <div style={{ ...dateStyle, fontSize:'12px' }}>{p.due || '—'}</div>
+          )}
+
+          <input
+            type="checkbox"
+            className="w-5 h-5"
+            checked={checked}
+            onChange={() => toggle(uid)}
+            onClick={(e) => e.stopPropagation()}
+            title="Select"
+          />
+        </div>
+      </div>
+    );
+  }
+
+  const pad = isSmall ? 'p-3' : isDesktop ? 'p-6' : 'p-4';
+
+  const TabButton = ({ id, label, icon }) => {
+    const active = tab === id;
+    return (
+      <button
+        type="button"
+        onClick={() => setTab(id)}
+        className={`flex-1 px-3 py-2 rounded-lg border-4 ${active ? 'bg-[#6B9C3D] border-[#4A7A1A] text-white' : 'bg-white border-[#C8B488] text-[#4A3020]'}`}
+        style={{ ...pxS, fontWeight:900, fontSize:'12px' }}
+      >
+        {icon} {label}
+      </button>
+    );
+  };
+
+  const empty = nowList.length === 0 && upcomingList.length === 0;
+
+  const totalRaw = (nowListRaw.length + upcomingListRaw.length);
+  const totalShown = (nowList.length + upcomingList.length);
+
+  return (
+    <div className={`flex flex-col ${pad} w-full pb-4 fade-in`}
+      style={{ maxWidth: isDesktop ? '1100px' : '680px', margin: '0 auto' }}>
+      <PlantCard title="CARE DUE">
+        {status && <StatusMessage type={status.type} message={status.message} />}
+
+        {/* Tabs */}
+        <div className="grid grid-cols-3 gap-2 mb-3">
+          <TabButton id="water" label="Water" icon="💧" />
+          <TabButton id="fert" label="Fertilize" icon="🌾" />
+          <TabButton id="both" label="Both" icon="💧🌾" />
+        </div>
+
+        {/* Filters */}
+        <div className="bg-white rounded-xl border-2 border-[#C8B488] shadow-sm p-3 mb-3">
+          <div style={{ ...px8S, color:'#4A3020', marginBottom:'8px' }}>FILTERS</div>
+
+          <div className="flex flex-col sm:flex-row gap-3 sm:items-end sm:justify-between">
+            <div className="flex-1">
+              <div style={{ ...pxS, fontSize:'12px', fontWeight:900, color:'#4A3020' }}>Location</div>
+              <select
+                value={locFilter}
+                onChange={e => setLocFilter(e.target.value)}
+                className="mt-1 w-full border-4 border-[#6B4423] rounded-lg p-2 bg-white"
+                style={{ ...pxS, fontSize:'14px', color:'#4A3020' }}
+              >
+                <option value="">All</option>
+                {(locations || []).map(loc => (<option key={loc} value={loc}>{loc}</option>))}
+              </select>
+            </div>
+
+            <button
+              type="button"
+              onClick={clearFilters}
+              className="underline"
+              style={{ ...pxS, fontSize:'12px', color:'#4A3020', fontWeight:900 }}
+            >
+              Clear filters
+            </button>
+          </div>
+
+          <div className="mt-3">
+            <div style={{ ...pxS, fontSize:'12px', fontWeight:900, color:'#4A3020' }}>Medium</div>
+            <div className="mt-1 flex flex-wrap gap-2">
+              {SUB_PRESETS.map(p => {
+                const active = subPreset === p.key;
+                return (
+                  <button
+                    key={p.key || 'all'}
+                    type="button"
+                    onClick={() => setSubPreset(p.key)}
+                    className={`px-3 py-2 rounded-lg border-4 ${active ? 'bg-[#7BB5CC] border-[#5A8C9D] text-[#1A3A4A]' : 'bg-white border-[#C8B488] text-[#4A3020]'}`}
+                    style={{ ...pxS, fontWeight:900, fontSize:'12px' }}
+                  >
+                    {p.label}
+                  </button>
+                );
+              })}
+            </div>
+
+            <input
+              value={subContains}
+              onChange={e => setSubContains(e.target.value)}
+              placeholder="Optional: substrate contains… (pon, leca, soil mix)"
+              className="mt-2 w-full border-4 border-[#6B4423] rounded-lg p-2 bg-white"
+              style={{ ...pxS, fontSize:'13px', color:'#4A3020' }}
+            />
+
+            {filtersActive && (
+              <div className="mt-2 flex items-center justify-between gap-2 flex-wrap">
+                <div style={{ ...pxS, fontSize:'12px', color:'#4A3020', fontWeight:900 }}>
+                  Showing {totalShown} of {totalRaw}
+                </div>
+                {metaLoading && (
+                  <div style={{ ...pxS, fontSize:'12px', color:'#8B6040', fontWeight:800 }}>
+                    Loading filter data…
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Selection actions */}
+        <div className="flex items-center justify-between gap-2 mb-3 flex-wrap">
+          <div style={{ ...pxS, fontSize:'12px', color:'#4A3020', fontWeight:900 }}>
+            Selected: {selectedUids.length}
+          </div>
+          <div className="flex gap-3">
+            <button type="button" onClick={() => selectAll(nowList)} className="underline"
+              style={{ ...pxS, fontSize:'12px', color:'#4A3020', fontWeight:900 }}>
+              Select Due Now
+            </button>
+            <button type="button" onClick={clearAll} className="underline"
+              style={{ ...pxS, fontSize:'12px', color:'#4A3020', fontWeight:900 }}>
+              Clear
+            </button>
+          </div>
+        </div>
+
+        {empty && (
+          <StatusMessage
+            type="info"
+            message={tab === 'fert'
+              ? 'No plants due for fertilizer right now.'
+              : tab === 'both'
+                ? 'No plants due for both within 7 days.'
+                : 'No plants due for water right now.'}
+          />
+        )}
+
+        {nowList.length > 0 && (
+          <div className="mb-3">
+            <div style={{ ...pxS, fontWeight:900, color:'#4A3020' }}>Due now</div>
+            <div className="mt-2 space-y-2">
+              {nowList.map(p => (<Row key={p.uid} p={p} bucket="now" />))}
+            </div>
+          </div>
+        )}
+
+        {upcomingList.length > 0 && (
+          <div className="mb-3">
+            <div style={{ ...pxS, fontWeight:900, color:'#4A3020' }}>Upcoming (7 days)</div>
+            <div className="mt-2 space-y-2">
+              {upcomingList.map(p => (<Row key={p.uid} p={p} bucket="upcoming" />))}
+            </div>
+          </div>
+        )}
+
+        <div className="grid grid-cols-2 gap-2 mt-4">
+          <PlantButton onClick={applySelected} disabled={!selectedUids.length}>
+            {tab === 'fert' ? '🌾 Log Fertilized' : tab === 'both' ? '💧🌾 Log Both' : '💧 Log Watered'}
+          </PlantButton>
+          <PlantButton variant="ghost" onClick={goBack}>Back</PlantButton>
+        </div>
+      </PlantCard>
+    </div>
+  );
+}
+
+
+/* ===================== QUICK LOG ===================== */
+function QuickLogScreen() {
+  const { goBack, navigate } = useNavigation();
+  const { locations, getPlantsByLocation, search, quickLog, batchWater, batchFertilize, getLatestPhoto } = usePlantData();
+  const { isSmall, isDesktop } = useScreenSize();
+  const [pickMode, setPickMode] = useState('search');
+  const [mode, setMode] = useState('single');
+  const [q, setQ] = useState('');
+  const [results, setResults] = useState([]);
+  const [status, setStatus] = useState(null);
+  const [thumbs, setThumbs] = useState({});
+  const inFlightRef = useRef(0);
+  const [selected, setSelected] = useState({});
+  const selectedUids = Object.keys(selected).filter(k => selected[k]);
+  const [groupLoc, setGroupLoc] = useState('');
+  const [groupPlants, setGroupPlants] = useState([]);
+  const [groupLoading, setGroupLoading] = useState(false);
+  const [subPreset, setSubPreset] = useState('');
+  const [subFree, setSubFree] = useState('');
+  const [genusPick, setGenusPick] = useState('');
+  const [taxaFree, setTaxaFree] = useState('');
+  const [groupSelected, setGroupSelected] = useState({});
+
+  const SUB_PRESETS = [
+    { label:'Semi-Hydro', key:'semihydro', aliases:['semi hydro','semi-hydro','semihydro','pon','leca','hydroton','expanded clay','clay ball','stratum','fluval stratum','lava rock','pumice','perlite','zeolite'] },
+    { label:'Soil', key:'soil', aliases:['soil','potting','potting mix','mix','soil mix','promix','peat','peat moss','compost','worm cast','castings','manure','humus'] },
+    { label:'Coco', key:'coco', aliases:['coco','coir','coconut','coconut coir'] },
+    { label:'Bark', key:'bark', aliases:['bark','orchid','orchid bark','pine bark','fir bark','chunk','chunks'] },
+    { label:'Mineral', key:'mineral', aliases:['mineral','pumice','perlite','lava','lava rock','scoria','grit','sand','akadama','kanuma','zeolite','diatomite','calcined clay','turface'] },
+  ];
+
+  function open(uid) { navigate('plant', { uid }); }
+  async function logSingle(uid, kind) {
+    setStatus({ type:'loading', message:'Saving...' });
+    try {
+      if (kind === 'water') await quickLog(uid, { water:true, fertilize:false, repot:false, notes:'' });
+      if (kind === 'fert') await quickLog(uid, { water:false, fertilize:true, repot:false, notes:'' });
+      setStatus({ type:'success', message:'Saved ✅' });
+    } catch (e) { setStatus({ type:'error', message:'Failed' }); }
+    setTimeout(() => setStatus(null), 1000);
+  }
+  function toggle(uid) { setSelected(prev => ({ ...prev, [uid]: !prev[uid] })); }
+  function clearSelected(){ setSelected({}); }
+  async function multiWater(uids) {
+    const list = uids || selectedUids; if (!list.length) return;
+    setStatus({ type:'loading', message:'Logging water...' });
+    try { await batchWater(list, 'Watered'); setStatus({ type:'success', message:'Saved ✅' }); clearSelected(); setGroupSelected({}); }
+    catch(e){ setStatus({ type:'error', message:'Failed' }); }
+    setTimeout(() => setStatus(null), 1200);
+  }
+  async function multiFert(uids) {
+    const list = uids || selectedUids; if (!list.length) return;
+    setStatus({ type:'loading', message:'Logging fertilize...' });
+    try { await batchFertilize(list, 'Fertilized'); setStatus({ type:'success', message:'Saved ✅' }); clearSelected(); setGroupSelected({}); }
+    catch(e){ setStatus({ type:'error', message:'Failed' }); }
+    setTimeout(() => setStatus(null), 1200);
+  }
+
+  useEffect(() => {
+    let alive = true;
+    const qq = String(q || '').trim();
+    const t = setTimeout(async () => {
+      try {
+        if (!qq || pickMode !== 'search') { if (alive) { setResults([]); clearSelected(); } return; }
+        const ticket = ++inFlightRef.current;
+        const res = await search(qq, 20);
+        if (!alive) return; if (ticket !== inFlightRef.current) return;
+        setResults(res || []);
+      } catch (e) { if (!alive) return; setResults([]); }
+    }, 220);
+    return () => { alive = false; clearTimeout(t); };
+  }, [q, pickMode]);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      if (pickMode !== 'group') return;
+      if (!groupLoc) { setGroupPlants([]); setGroupSelected({}); return; }
+      setGroupLoading(true);
+      try {
+        const ps = await getPlantsByLocation(groupLoc);
+        if (!alive) return;
+        setGroupPlants(ps || []);
+        setGroupSelected({});
+      } catch(e){ if (!alive) return; setGroupPlants([]); setGroupSelected({}); }
+      finally { if (alive) setGroupLoading(false); }
+    })();
+    return () => { alive = false; };
+  }, [groupLoc, pickMode]);
+
+  function inferGenus(p){ const g = String(p.genus || '').trim(); if (g) return g; const gs = String(p.gs || '').trim(); if (gs) return gs.split(/\s+/)[0]; const cls = String(p.classification || '').trim(); if (cls) return cls.split(/\s+/)[0]; return ''; }
+  const availableGenera = useMemo(() => { const s = new Set(); (groupPlants || []).forEach(p => { const g = inferGenus(p); if (g) s.add(g); }); return Array.from(s).sort((a,b) => a.localeCompare(b)); }, [groupPlants]);
+  function substrateText(p){ return (String(p.substrate || '').trim() + ' ' + String(p.medium || '').trim()).trim().toLowerCase(); }
+  function matchesSubstrate(p){ const t = substrateText(p); const free = String(subFree || '').trim().toLowerCase(); const preset = SUB_PRESETS.find(x => x.key === subPreset); const presetOk = preset ? preset.aliases.some(a => t.includes(String(a).toLowerCase())) : true; const freeOk = free ? t.includes(free) : true; return presetOk && freeOk; }
+  function matchesTaxa(p){ const g = inferGenus(p); if (genusPick && String(g).toLowerCase() !== String(genusPick).toLowerCase()) return false; const q2 = String(taxaFree || '').trim().toLowerCase(); if (!q2) return true; const hay = [p.genus, p.species, p.taxon, p.gs, p.classification, p.primary, p.nickname].map(x => String(x || '')).join(' • ').toLowerCase(); return hay.includes(q2); }
+  const groupMatches = useMemo(() => { const list = groupPlants || []; return list.filter(p => matchesSubstrate(p) && matchesTaxa(p)); }, [groupPlants, subPreset, subFree, genusPick, taxaFree]);
+  useEffect(() => {
+    if (pickMode !== 'group') return;
+    const hasManual = Object.keys(groupSelected || {}).length > 0;
+    if (hasManual) return;
+    const all = {}; (groupMatches || []).forEach(p => { if (p && p.uid) all[String(p.uid)] = true; }); setGroupSelected(all);
+  }, [groupMatches, pickMode]);
+  function toggleGroup(uid){ const k = String(uid || ''); if (!k) return; setGroupSelected(prev => ({ ...prev, [k]: !prev[k] })); }
+  function groupSelectAll(){ const all = {}; (groupMatches || []).forEach(p => { if (p && p.uid) all[String(p.uid)] = true; }); setGroupSelected(all); }
+  function groupSelectNone(){ setGroupSelected({}); }
+  const groupSelectedUids = useMemo(() => Object.keys(groupSelected || {}).filter(k => groupSelected[k]), [groupSelected, groupMatches]);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      const list = (pickMode === 'group') ? (groupMatches || []) : (results || []);
+      const next = {};
+      for (let i = 0; i < list.length; i++) {
+        const uid = list[i] && list[i].uid ? String(list[i].uid) : '';
+        if (!uid) continue; if (thumbs[uid] || next[uid]) continue;
+        try { const res = await getLatestPhoto(uid); if (res && res.ok && res.photo && res.photo.thumbUrl) next[uid] = res.photo.thumbUrl; } catch(e){}
+      }
+      if (!alive) return;
+      if (Object.keys(next).length) setThumbs(prev => ({ ...prev, ...next }));
+    })();
+    return () => { alive = false; };
+  }, [results, groupMatches, pickMode]);
+
+  const pxS = { fontFamily:"'Pixelify Sans', cursive" };
+
+  return (
+    <div className={`flex flex-col ${isSmall ? 'p-3' : isDesktop ? 'p-6' : 'p-4'} w-full pb-4 fade-in`}
+      style={{ maxWidth: isDesktop ? '1100px' : '680px', margin: '0 auto' }}>
+      <PlantCard title="QUICK LOG">
+        {status && <StatusMessage type={status.type} message={status.message} />}
+        <div className="flex items-center justify-between gap-2 mb-3">
+          <div className="flex items-center gap-2">
+            <div style={{ ...pxS, fontWeight:900, color:'#4A3020' }}>Mode</div>
+            <button type="button" onClick={() => setPickMode('search')}
+              className={`px-3 py-2 rounded-lg border-4 ${pickMode==='search' ? 'bg-[#8BB55C] border-[#6B9C3D] text-[#2A4A1A]' : 'bg-white border-[#C8B488] text-[#4A3020]'}`}
+              style={{ ...pxS, fontWeight:900, fontSize:'12px' }}>Search</button>
+            <button type="button" onClick={() => { setPickMode('group'); setMode('multi'); clearSelected(); setQ(''); setResults([]); }}
+              className={`px-3 py-2 rounded-lg border-4 ${pickMode==='group' ? 'bg-[#7BB5CC] border-[#5A8C9D] text-[#1A3A4A]' : 'bg-white border-[#C8B488] text-[#4A3020]'}`}
+              style={{ ...pxS, fontWeight:900, fontSize:'12px' }}>Group</button>
+          </div>
+          {pickMode === 'search' && (
+            <div className="flex gap-2">
+              <button type="button" onClick={() => { setMode('single'); clearSelected(); }}
+                className={`px-3 py-2 rounded-lg border-4 ${mode==='single' ? 'bg-[#8BB55C] border-[#6B9C3D] text-[#2A4A1A]' : 'bg-white border-[#C8B488] text-[#4A3020]'}`}
+                style={{ ...pxS, fontWeight:900, fontSize:'12px' }}>Single</button>
+              <button type="button" onClick={() => setMode('multi')}
+                className={`px-3 py-2 rounded-lg border-4 ${mode==='multi' ? 'bg-[#7BB5CC] border-[#5A8C9D] text-[#1A3A4A]' : 'bg-white border-[#C8B488] text-[#4A3020]'}`}
+                style={{ ...pxS, fontWeight:900, fontSize:'12px' }}>Multi</button>
+            </div>
+          )}
+        </div>
+
+        {pickMode === 'search' && (
+          <>
+            <input value={q} onChange={e => setQ(e.target.value)}
+              className="w-full border-4 border-[#6B4423] rounded-lg p-2 bg-white input-depth"
+              style={{ ...pxS, fontSize:'14px', color:'#4A3020' }}
+              placeholder="nickname, genus, UID..." />
+            {mode === 'multi' && (
+              <div className="mt-2 flex items-center justify-between">
+                <div style={{ ...pxS, fontSize:'12px', color:'#4A3020', fontWeight:900 }}>Selected: {selectedUids.length}</div>
+                <div className="flex gap-2">
+                  <PlantButton onClick={() => multiWater()} disabled={!selectedUids.length} className="px-3 py-2">💧 Log Watered</PlantButton>
+                  <PlantButton variant="secondary" onClick={() => multiFert()} disabled={!selectedUids.length} className="px-3 py-2">🌾 Log Fertilized</PlantButton>
+                </div>
+              </div>
+            )}
+            <div className="mt-3 space-y-2">
+              {(results || []).map(p => {
+                const uid = String(p.uid || '');
+                const primary = p.primary || p.nickname || p.gs || p.classification || uid;
+                const cls = p.classification || ''; const loc = p.location || '';
+                return (
+                  <div key={uid} className="bg-white border-2 border-[#C8B488] rounded-lg p-2 flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0 flex-1">
+                      <MiniThumb url={thumbs[uid]} />
+                      <div className="min-w-0 flex-1 cursor-pointer" onClick={() => open(uid)}>
+                        <div style={{ ...pxS, fontWeight:900, color:'#4A3020' }} className="truncate">{primary}</div>
+                        <div style={{ ...pxS, fontSize:'12px', color:'#6B4423' }} className="truncate">{[cls, loc].filter(Boolean).join(' • ')}</div>
+                      </div>
+                    </div>
+                    <div className="flex gap-2 shrink-0">
+                      {mode === 'multi'
+                        ? <input type="checkbox" className="w-5 h-5" checked={!!selected[uid]} onChange={() => toggle(uid)} title="Select" />
+                        : (<><PlantButton onClick={() => logSingle(uid, 'water')} className="px-3 py-2">💧</PlantButton><PlantButton variant="secondary" onClick={() => logSingle(uid, 'fert')} className="px-3 py-2">🌾</PlantButton></>)
+                      }
+                    </div>
+                  </div>
+                );
+              })}
+              {!q && <div style={{ ...pxS, color:'#4A3020' }}>Type to search…</div>}
+              {q && (results || []).length === 0 && <div style={{ ...pxS, color:'#4A3020' }}>No matches.</div>}
+            </div>
+          </>
+        )}
+
+        {pickMode === 'group' && (
+          <>
+            <div className="space-y-3">
+              <div>
+                <div style={{ ...pxS, fontSize:'12px', fontWeight:700, color:'#4A3020' }}>Location (required)</div>
+                <select value={groupLoc} onChange={e => { setGroupLoc(e.target.value); setGroupSelected({}); }}
+                  className="mt-1 w-full border-4 border-[#6B4423] rounded-lg p-2 bg-white"
+                  style={{ ...pxS, fontSize:'14px', color:'#4A3020' }}>
+                  <option value="">— Select —</option>
+                  {(locations || []).map(loc => (<option key={loc} value={loc}>{loc}</option>))}
+                </select>
+              </div>
+              <div>
+                <div style={{ ...pxS, fontSize:'12px', fontWeight:700, color:'#4A3020' }}>Substrate</div>
+                <div className="mt-1 flex flex-wrap gap-2">
+                  {SUB_PRESETS.map(p => (
+                    <button key={p.key} type="button" onClick={() => setSubPreset(subPreset === p.key ? '' : p.key)}
+                      className={`px-3 py-2 rounded-lg border-4 ${subPreset === p.key ? 'bg-[#7BB5CC] border-[#5A8C9D] text-[#1A3A4A]' : 'bg-white border-[#C8B488] text-[#4A3020]'}`}
+                      style={{ ...pxS, fontWeight:900, fontSize:'12px' }}>{p.label}</button>
+                  ))}
+                </div>
+                <input value={subFree} onChange={e => setSubFree(e.target.value)}
+                  placeholder="Optional: contains… (e.g. pon, leca, soil mix)"
+                  className="mt-2 w-full border-4 border-[#6B4423] rounded-lg p-2 bg-white"
+                  style={{ ...pxS, fontSize:'13px', color:'#4A3020' }} />
+              </div>
+              <div>
+                <div style={{ ...pxS, fontSize:'12px', fontWeight:700, color:'#4A3020' }}>Taxa</div>
+                <div className="mt-1 grid grid-cols-2 gap-2">
+                  <div>
+                    <div style={{ ...pxS, fontSize:'11px', color:'#6B4423', fontWeight:800 }}>Genus</div>
+                    <select value={genusPick} onChange={e => setGenusPick(e.target.value)}
+                      className="mt-1 w-full border-4 border-[#6B4423] rounded-lg p-2 bg-white"
+                      style={{ ...pxS, fontSize:'13px', color:'#4A3020' }}>
+                      <option value="">Any</option>
+                      {availableGenera.map(g => (<option key={g} value={g}>{g}</option>))}
+                    </select>
+                  </div>
+                  <div>
+                    <div style={{ ...pxS, fontSize:'11px', color:'#6B4423', fontWeight:800 }}>Contains (species/taxon)</div>
+                    <input value={taxaFree} onChange={e => setTaxaFree(e.target.value)}
+                      placeholder="Optional" className="mt-1 w-full border-4 border-[#6B4423] rounded-lg p-2 bg-white"
+                      style={{ ...pxS, fontSize:'13px', color:'#4A3020' }} />
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div style={{ ...pxS, fontSize:'12px', fontWeight:900, color:'#4A3020' }}>
+                  {groupLoading ? 'Loading…' : `Matches: ${groupMatches.length}`}  •  Selected: {groupSelectedUids.length}
+                </div>
+                <div className="flex gap-2">
+                  <button type="button" onClick={groupSelectAll} className="underline" style={{ ...pxS, fontSize:'12px', color:'#4A3020' }}>Select All</button>
+                  <button type="button" onClick={groupSelectNone} className="underline" style={{ ...pxS, fontSize:'12px', color:'#4A3020' }}>None</button>
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <PlantButton onClick={() => multiWater(groupSelectedUids)} disabled={!groupSelectedUids.length} className="px-3 py-2">💧 Log Watered</PlantButton>
+                <PlantButton variant="secondary" onClick={() => multiFert(groupSelectedUids)} disabled={!groupSelectedUids.length} className="px-3 py-2">🌾 Log Fertilized</PlantButton>
+              </div>
+              <div className="space-y-2 max-h-80 overflow-y-auto mt-2">
+                {groupLoading && <div style={{ ...pxS, color:'#4A3020' }}>Loading plants…</div>}
+                {!groupLoading && !groupLoc && <div style={{ ...pxS, color:'#4A3020' }}>Pick a location to build a group.</div>}
+                {!groupLoading && groupLoc && groupMatches.length === 0 && <div style={{ ...pxS, color:'#4A3020' }}>No matches for these filters.</div>}
+                {!groupLoading && groupMatches.map(p => {
+                  const uid = String(p.uid || '');
+                  const primary = p.primary || p.nickname || p.gs || p.classification || uid;
+                  const sub = [p.classification || '', p.substrate || p.medium || ''].filter(Boolean).join(' • ');
+                  return (
+                    <div key={uid} className="bg-white border-2 border-[#C8B488] rounded-lg p-2 flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 min-w-0 flex-1">
+                        <MiniThumb url={thumbs[uid]} />
+                        <div className="min-w-0 flex-1 cursor-pointer" onClick={() => open(uid)}>
+                          <div style={{ ...pxS, fontWeight:900, color:'#4A3020' }} className="truncate">{primary}</div>
+                          <div style={{ ...pxS, fontSize:'12px', color:'#6B4423' }} className="truncate">{sub}</div>
+                        </div>
+                      </div>
+                      <input type="checkbox" className="w-5 h-5" checked={!!groupSelected[uid]} onChange={() => toggleGroup(uid)} title="Include" />
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </>
+        )}
+        <div className="mt-4"><PlantButton variant="ghost" onClick={goBack}>Back</PlantButton></div>
+      </PlantCard>
+    </div>
+  );
+}
+
+/* ===================== ADD PLANT ===================== */
+function AddScreen() {
+  const { goBack, navigate } = useNavigation();
+  const { locations, createPlant } = usePlantData();
+  const { isSmall, isDesktop } = useScreenSize();
+
+  const [nickname, setNickname] = useState('');
+  const [genus, setGenus] = useState('');
+  const [taxon, setTaxon] = useState('');
+  const [location, setLocation] = useState('');
+  const [showOptional, setShowOptional] = useState(false);
+  const [birthday, setBirthday] = useState('');
+  const [medium, setMedium] = useState('');
+  const [potSize, setPotSize] = useState('');
+  const [waterEveryDays, setWaterEveryDays] = useState('');
+  const [fertilizeEveryDays, setFertilizeEveryDays] = useState('');
+  const [status, setStatus] = useState(null);
+
+  function requiredOk() {
+    const hasName = String(nickname || '').trim() || String(genus || '').trim() || String(taxon || '').trim();
+    return !!(hasName && String(location || '').trim());
+  }
+
+  async function submit() {
+    if (!requiredOk()) {
+      setStatus({ type:'error', message:'Need at least a name (nickname or genus/species) + a location.' });
+      setTimeout(() => setStatus(null), 2200);
+      return;
+    }
+    setStatus({ type:'loading', message:'Creating plant...' });
+    try {
+      const payload = {
+        nickname: String(nickname || '').trim(),
+        genus:    String(genus    || '').trim(),
+        taxon:    String(taxon    || '').trim(),
+        location: String(location || '').trim(),
+        birthday: String(birthday || '').trim(),
+        medium:   String(medium   || '').trim(),
+        substrate:String(medium   || '').trim(),
+        potSize:  String(potSize  || '').trim(),
+        everyDays:          String(waterEveryDays      || '').trim(),
+        fertilizeEveryDays: String(fertilizeEveryDays  || '').trim(),
+      };
+      const res = await createPlant(payload);
+      const uid = res && res.uid ? String(res.uid) : '';
+      setStatus({ type:'success', message:'Added ✅' });
+      setTimeout(() => { setStatus(null); if (uid) navigate('plant', { uid }); else navigate('home'); }, 900);
+    } catch (e) {
+      setStatus({ type:'error', message: (e && e.message) ? e.message : 'Failed' });
+      setTimeout(() => setStatus(null), 2200);
+    }
+  }
+
+  const pxS = { fontFamily:"'Pixelify Sans', cursive" };
+
+  return (
+    <div className={`flex flex-col ${isSmall ? 'p-3' : isDesktop ? 'p-6' : 'p-4'} w-full pb-4 fade-in`}
+      style={{ maxWidth: isDesktop ? '1100px' : '680px', margin: '0 auto' }}>
+      <PlantCard title="ADD PLANT">
+        {status && <StatusMessage type={status.type} message={status.message} />}
+        <div className="space-y-3">
+          <div>
+            <div style={{ ...pxS, fontSize:'12px', fontWeight:700, color:'#4A3020' }}>Nickname (optional)</div>
+            <input value={nickname} onChange={e => setNickname(e.target.value)}
+              className="mt-1 w-full border-4 border-[#6B4423] rounded-lg p-2 bg-white"
+              style={{ ...pxS, fontSize:'14px', color:'#4A3020' }} placeholder="e.g., 'Giga Chad'" />
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <div style={{ ...pxS, fontSize:'12px', fontWeight:700, color:'#4A3020' }}>Genus</div>
+              <input value={genus} onChange={e => setGenus(e.target.value)}
+                className="mt-1 w-full border-4 border-[#6B4423] rounded-lg p-2 bg-white"
+                style={{ ...pxS, fontSize:'14px', color:'#4A3020' }} placeholder="e.g., Alocasia" />
+            </div>
+            <div>
+              <div style={{ ...pxS, fontSize:'12px', fontWeight:700, color:'#4A3020' }}>Species / Taxon</div>
+              <input value={taxon} onChange={e => setTaxon(e.target.value)}
+                className="mt-1 w-full border-4 border-[#6B4423] rounded-lg p-2 bg-white"
+                style={{ ...pxS, fontSize:'14px', color:'#4A3020' }} placeholder="e.g., baginda" />
+            </div>
+          </div>
+          <div>
+            <div style={{ ...pxS, fontSize:'12px', fontWeight:700, color:'#4A3020' }}>Location (required)</div>
+            <select value={location} onChange={e => setLocation(e.target.value)}
+              className="mt-1 w-full border-4 border-[#6B4423] rounded-lg p-2 bg-white"
+              style={{ ...pxS, fontSize:'14px', color:'#4A3020' }}>
+              <option value="">— Select —</option>
+              {locations.map(loc => (<option key={loc} value={loc}>{loc}</option>))}
+            </select>
+          </div>
+          <button type="button" onClick={() => setShowOptional(v => !v)} className="underline"
+            style={{ ...pxS, fontSize:'12px', color:'#4A3020' }}>
+            {showOptional ? 'Hide optional fields' : 'Show optional fields'}
+          </button>
+          {showOptional && (
+            <div className="space-y-3 border-2 border-[#C8B488] rounded-lg p-3 bg-white">
+              <div>
+                <div style={{ ...pxS, fontSize:'12px', fontWeight:700, color:'#4A3020' }}>DOB (optional)</div>
+                <input value={birthday} onChange={e => setBirthday(e.target.value)}
+                  className="mt-1 w-full border-4 border-[#6B4423] rounded-lg p-2 bg-white"
+                  style={{ ...pxS, fontSize:'14px', color:'#4A3020' }} placeholder="YYYY-MM-DD" />
+              </div>
+              <div>
+                <div style={{ ...pxS, fontSize:'12px', fontWeight:700, color:'#4A3020' }}>Substrate / Medium (optional)</div>
+                <input value={medium} onChange={e => setMedium(e.target.value)}
+                  className="mt-1 w-full border-4 border-[#6B4423] rounded-lg p-2 bg-white"
+                  style={{ ...pxS, fontSize:'14px', color:'#4A3020' }} placeholder="e.g., Semi-Hydro" />
+              </div>
+              <div>
+                <label className="block text-[#4A3020] mb-1" style={{ fontFamily:"'Press Start 2P', cursive", fontSize:'10px' }}>Pot Size (optional)</label>
+                <select value={potSize} onChange={e => setPotSize(e.target.value)}
+                  className="w-full p-3 rounded-lg border-4 border-[#6B4423] bg-white"
+                  style={{ ...pxS, fontSize:'14px' }}>
+                  <option value="">—</option>
+                  {['2"','3"','4"','5"','6"','7"','8"','10"','12"'].map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[#4A3020] mb-1" style={{ fontFamily:"'Press Start 2P', cursive", fontSize:'10px' }}>Water Every (days)</label>
+                  <input value={waterEveryDays} onChange={e => setWaterEveryDays(e.target.value.replace(/[^0-9]/g,''))}
+                    placeholder="e.g. 10" className="w-full p-3 rounded-lg border-4 border-[#6B4423]"
+                    style={{ ...pxS, fontSize:'14px' }} />
+                </div>
+                <div>
+                  <label className="block text-[#4A3020] mb-1" style={{ fontFamily:"'Press Start 2P', cursive", fontSize:'10px' }}>Fertilize Every (days)</label>
+                  <input value={fertilizeEveryDays} onChange={e => setFertilizeEveryDays(e.target.value.replace(/[^0-9]/g,''))}
+                    placeholder="e.g. 30" className="w-full p-3 rounded-lg border-4 border-[#6B4423]"
+                    style={{ ...pxS, fontSize:'14px' }} />
+                </div>
+              </div>
+            </div>
+          )}
+          <div className="mt-4 space-x-2">
+            <PlantButton onClick={submit}>✅ Add</PlantButton>
+            <PlantButton variant="ghost" onClick={goBack}>Back</PlantButton>
+          </div>
+        </div>
+      </PlantCard>
+    </div>
+  );
+}
+
+/* ===================== MY PLANTS ===================== */
+function MyPlantsScreen() {
+  const { goBack, navigate } = useNavigation();
+  const { locations, getPlantsByLocation, getLatestPhoto, updatePlant, setNickname, search } = usePlantData();
+  const { isSmall, isDesktop } = useScreenSize();
+  const [selectedLoc, setSelectedLoc] = useState('');
+  const [plants, setPlants] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [thumbs, setThumbs] = useState({});
+  const [plantFilter, setPlantFilter] = useState('');
+  const [globalQ, setGlobalQ] = useState('');
+  const [globalResults, setGlobalResults] = useState([]);
+  const [globalLoading, setGlobalLoading] = useState(false);
+  const globalTicketRef = useRef(0);
+  const [editUid, setEditUid] = useState('');
+  const [edit, setEdit] = useState({});
+  const [editStatus, setEditStatus] = useState(null);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      if (!selectedLoc) { setPlants([]); setPlantFilter(''); setEditUid(''); return; }
+      setLoading(true);
+      try {
+        const ps = await getPlantsByLocation(selectedLoc);
+        const counts = {};
+        (ps || []).forEach(p => { const key = String(p.classification || '').trim().toLowerCase(); if (!key) return; counts[key] = (counts[key] || 0) + 1; });
+        const dupIndex = {};
+        Object.keys(counts).forEach(k => { dupIndex[k] = 1; });
+        const processed = (ps || []).map(p => {
+          const cls0 = String(p.classification || '').trim();
+          let cls = cls0;
+          const key = String(cls0 || '').trim().toLowerCase();
+          if (!p.nickname && key && counts[key] > 1) { const idx = dupIndex[key]++; cls = `${cls0} (#${idx})`; }
+          const title = p.nickname ? String(p.nickname).trim() : (cls || p.gs || p.uid);
+          const tax = p.nickname ? (p.gs || cls0 || '') : '';
+          const line2 = [tax, p.location].filter(Boolean).join(' • ');
+          return { ...p, _title: title, _tax: tax, _line2: line2 };
+        });
+        if (!alive) return;
+        setPlants(processed);
+      } catch(e) { if (!alive) return; setPlants([]); }
+      finally { if (alive) setLoading(false); }
+    })();
+    return () => { alive = false; };
+  }, [selectedLoc]);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      const list = [...(plants || []), ...(globalResults || [])];
+      const next = {};
+      for (let i=0;i<list.length;i++){
+        const uid = String(list[i].uid || '');
+        if (!uid) continue; if (thumbs[uid] || next[uid]) continue;
+        try { const res = await getLatestPhoto(uid); if (res && res.ok && res.photo && res.photo.thumbUrl) next[uid] = res.photo.thumbUrl; } catch(e){}
+      }
+      if (!alive) return;
+      if (Object.keys(next).length) setThumbs(prev => ({ ...prev, ...next }));
+    })();
+    return () => { alive = false; };
+  }, [plants, globalResults]);
+
+  function openPlant(uid){ navigate('plant', { uid }); }
+
+  useEffect(() => {
+    let alive = true;
+    const qq = String(globalQ || '').trim();
+    const ticket = ++globalTicketRef.current;
+    if (!qq) { setGlobalLoading(false); setGlobalResults([]); return () => { alive = false; }; }
+    setGlobalLoading(true);
+    (async () => {
+      try {
+        const res = await search(qq, 25);
+        if (!alive) return; if (ticket !== globalTicketRef.current) return;
+        setGlobalResults(res || []);
+      } catch (e) { if (!alive) return; if (ticket !== globalTicketRef.current) return; setGlobalResults([]); }
+      finally { if (!alive) return; if (ticket !== globalTicketRef.current) return; setGlobalLoading(false); }
+    })();
+    return () => { alive = false; };
+  }, [globalQ]);
+
+  const filteredPlants = useMemo(() => {
+    const q = normStr(plantFilter);
+    if (!q) return plants;
+    return (plants || []).filter(p => {
+      const hay = [p._title, p._tax, p._line2, p.uid, p.genus, p.species, p.taxon, p.classification].map(x => String(x||'')).join(' • ').toLowerCase();
+      return hay.includes(q);
+    });
+  }, [plantFilter, plants]);
+
+  function openEdit(p){ setEditUid(String(p.uid || '')); setEdit({ nickname: p.nickname || '', location: p.location || '', potSize: p.potSize || '', substrate: p.substrate || p.medium || '', genus: p.genus || '', taxon: p.species || p.taxon || '', classification: p.classification || '', everyDays: p.everyDays || '', fertilizeEveryDays: p.fertilizeEveryDays || '', birthday: p.birthday || '' }); setEditStatus(null); }
+  function closeEdit(){ setEditUid(''); setEdit({}); setEditStatus(null); }
+
+  async function saveEdit(){
+    if (!editUid) return;
+    setEditStatus({ type:'loading', message:'Saving...' });
+    try {
+      const nn = String(edit.nickname || '').trim();
+      if (nn) await setNickname(editUid, nn);
+      else await updatePlant(editUid, { nickname: '' });
+      await updatePlant(editUid, {
+        location: String(edit.location||'').trim(), potSize: String(edit.potSize||'').trim(),
+        substrate: String(edit.substrate||'').trim(), genus: String(edit.genus||'').trim(),
+        taxon: String(edit.taxon||'').trim(), classification: String(edit.classification||'').trim(),
+        everyDays: String(edit.everyDays||'').trim(), fertilizeEveryDays: String(edit.fertilizeEveryDays||'').trim(),
+        birthday: String(edit.birthday||'').trim(), recomputeDue: true
+      });
+      setEditStatus({ type:'success', message:'Saved ✅' });
+      const qq = String(globalQ || '').trim();
+      if (qq) { try { const res = await search(qq, 25); setGlobalResults(res || []); } catch (e) { setGlobalResults([]); } }
+      if (selectedLoc) {
+        const ps = await getPlantsByLocation(selectedLoc);
+        const processed = (ps || []).map(p => { const cls0 = String(p.classification || '').trim(); const title = p.nickname ? String(p.nickname).trim() : (p.gs || cls0 || p.uid); const tax = p.gs || cls0 || ''; const line2 = [p.nickname ? tax : '', p.location].filter(Boolean).join(' • '); return { ...p, _title: title, _tax: tax, _line2: line2 }; });
+        setPlants(processed);
+      }
+      setTimeout(() => setEditStatus(null), 900);
+    } catch(e){ setEditStatus({ type:'error', message:'Failed' }); setTimeout(() => setEditStatus(null), 1500); }
+  }
+
+  const pxS = { fontFamily:"'Pixelify Sans', cursive" };
+
+  return (
+    <div className={`flex flex-col ${isSmall ? 'p-3' : isDesktop ? 'p-6' : 'p-4'} w-full pb-4 fade-in`}
+      style={{ maxWidth: isDesktop ? '1100px' : '680px', margin: '0 auto' }}>
+      <PlantCard title="MY PLANTS">
+        <div className="mb-3">
+          <input value={globalQ} onChange={e => setGlobalQ(e.target.value)} placeholder="Search all plants..."
+            className="w-full border-4 border-[#6B4423] rounded-lg p-2 bg-white input-depth"
+            style={{ ...pxS, fontSize:'14px', color:'#4A3020' }} />
+        </div>
+
+        {globalQ.trim() ? (
+          <div className="mb-3">
+            {globalLoading && <StatusMessage type="loading" message="Searching..." />}
+            {!globalLoading && globalResults.length === 0 && <div style={{ ...pxS, fontSize:'13px', color:'#4A3020' }}>No plants found.</div>}
+            {globalResults.map(p => {
+              const uid = String(p.uid || '');
+              const title = p.nickname ? String(p.nickname).trim() : (p.gs || p.classification || uid);
+              const tax = p.nickname ? (p.gs || p.classification || '') : '';
+              return (
+                <div key={uid} className="flex items-center gap-2 border-2 border-[#C8B488] rounded-lg p-2 bg-white mb-2 hover:bg-[#F4E4C1]">
+                  <div className="flex items-center gap-2 flex-1 min-w-0 cursor-pointer plant-item" onClick={() => navigate('plant', { uid })}>
+                    <MiniThumb url={thumbs[uid]} />
+                    <div className="flex-1 min-w-0">
+                      <div style={{ ...pxS, fontSize:'14px', fontWeight:900, color:'#4A3020' }} className="truncate">{title}</div>
+                      {tax && <div style={{ ...pxS, fontSize:'12px', color:'#6B4423', fontWeight:800 }} className="truncate">{tax}</div>}
+                      <div style={{ ...pxS, fontSize:'12px', color:'#8B6040' }} className="truncate">{[p.location, p.birthday ? '🎂 ' + p.birthday : ''].filter(Boolean).join('  •  ')}</div>
+                    </div>
+                  </div>
+                  <button type="button" onClick={e => { e.stopPropagation(); openEdit(p); }}
+                    className="px-3 py-2 rounded-lg border-4 border-[#C8B488] bg-[#F4E4C1] hover:bg-[#E8D4A8] active:scale-[0.98]"
+                    style={{ ...pxS, fontWeight:900, color:'#4A3020', fontSize:'12px' }} title="Edit">✏️</button>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <>
+            <div className="mb-3">
+              <label style={{ ...pxS, fontSize:'12px', fontWeight:'700', color:'#4A3020' }}>Or browse by location:</label>
+              <select value={selectedLoc} onChange={e => { setSelectedLoc(e.target.value); setPlantFilter(''); setGlobalQ(''); setGlobalResults([]); closeEdit(); }}
+                className="mt-1 w-full border-4 border-[#6B4423] rounded-lg p-2 bg-white"
+                style={{ ...pxS, fontSize:'14px', color:'#4A3020' }}>
+                <option value="">— Select —</option>
+                {locations.map(loc => (<option key={loc} value={loc}>{loc}</option>))}
+              </select>
+            </div>
+            {selectedLoc && !loading && plants.length > 0 && (
+              <div className="mb-3">
+                <input value={plantFilter} onChange={e => setPlantFilter(e.target.value)} placeholder="Filter in this location..."
+                  className="w-full border-4 border-[#6B4423] rounded-lg p-2 bg-white input-depth"
+                  style={{ ...pxS, fontSize:'13px', color:'#4A3020' }} />
+              </div>
+            )}
+            {loading && <StatusMessage type="loading" message="Loading plants..." />}
+            {!loading && selectedLoc && plants.length === 0 && <StatusMessage type="info" message="No plants in this location." />}
+            {!loading && selectedLoc && plants.length > 0 && filteredPlants.length === 0 && <StatusMessage type="info" message="No plants match your filter." />}
+
+            {editUid && (
+              <div className="mb-3 bg-white rounded-xl border-4 border-[#C8B488] shadow p-3">
+                <div style={{ fontFamily:"'Press Start 2P', cursive", fontSize:'10px', color:'#4A3020' }}>EDIT</div>
+                {editStatus && <div className="mt-2"><StatusMessage type={editStatus.type} message={editStatus.message} /></div>}
+                <div className="grid grid-cols-2 gap-2 mt-2">
+                  {[['col-span-2','Nickname','nickname'],['col-span-2','Location','location'],['','Pot Size','potSize'],['','Substrate','substrate'],['','Genus','genus'],['','Species / Taxon','taxon'],['col-span-2','Classification','classification'],['','Water Every (days)','everyDays'],['','Fertilize Every (days)','fertilizeEveryDays'],['col-span-2','Birthday (YYYY-MM-DD)','birthday']].map(([span, label, field]) => (
+                    <div key={field} className={span}>
+                      <div style={{ ...pxS, fontSize:'11px', fontWeight:800, color:'#6B4423' }}>{label}</div>
+                      <input value={edit[field] || ''} onChange={e => setEdit(prev => ({...prev, [field]:e.target.value}))}
+                        className="w-full border-4 border-[#6B4423] rounded-lg px-3 py-2 bg-white mt-1 input-depth"
+                        style={{ ...pxS, fontSize:'13px' }} />
+                    </div>
+                  ))}
+                </div>
+                <div className="flex gap-2 mt-3">
+                  <PlantButton onClick={saveEdit}>Save</PlantButton>
+                  <PlantButton variant="ghost" onClick={closeEdit}>Close</PlantButton>
+                </div>
+              </div>
+            )}
+
+            {!loading && filteredPlants.length > 0 && (
+              <div className={isDesktop ? "grid grid-cols-2 gap-2" : "space-y-2"}>
+                {filteredPlants.map(p => {
+                  const uid = String(p.uid || '');
+                  const title = p._title || p.nickname || p.primary || p.gs || p.classification || uid;
+                  const tax = p._tax || p.gs || p.classification || '';
+                  const subtitle = p.nickname ? [tax, p.location].filter(Boolean).join(' • ') : (p.location ? `📍 ${p.location}` : '');
+                  return (
+                    <div key={uid} className="flex items-center justify-between border-2 border-[#C8B488] rounded-lg p-2 bg-white gap-2">
+                      <div className="flex items-center gap-2 min-w-0 flex-1">
+                        <MiniThumb url={thumbs[uid]} />
+                        <div className="flex-1 min-w-0 cursor-pointer" onClick={() => openPlant(uid)}>
+                          <div style={{ ...pxS, fontSize:'14px', color:'#4A3020', fontWeight:900 }} className="truncate">{title}</div>
+                          {subtitle && <div style={{ ...pxS, fontSize:'12px', color:'#6B4423', fontWeight:800 }} className="truncate">{subtitle}</div>}
+                          {p.birthday && <div style={{ ...pxS, fontSize:'12px', color:'#8B6040', fontWeight:800 }} className="truncate">🎂 {p.birthday}</div>}
+                        </div>
+                      </div>
+                      <button type="button" onClick={() => openEdit(p)}
+                        className="px-3 py-2 rounded-lg border-4 border-[#C8B488] bg-[#F4E4C1] hover:bg-[#E8D4A8] active:scale-[0.98]"
+                        style={{ ...pxS, fontWeight:900, color:'#4A3020', fontSize:'12px' }} title="Edit">✏️</button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </>
+        )}
+        <div className="mt-4"><PlantButton variant="ghost" onClick={goBack}>Back</PlantButton></div>
+      </PlantCard>
+    </div>
+  );
+}
+
+function LocationsScreen(){ return <MyPlantsScreen />; }
+
+/* ===================== PLANT LOG ===================== */
+function PlantLogScreen() {
+  const { goBack, navigate } = useNavigation();
+  const { getRecentLog, getPlant } = usePlantData();
+  const { isSmall, isDesktop } = useScreenSize();
+  const [items, setItems] = useState([]);
+  const [plants, setPlants] = useState({});
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const logs = await getRecentLog(100);
+        if (!mounted) return;
+        setItems(logs || []);
+        const uids = Array.from(new Set((logs || []).map(l => l.uid).filter(Boolean)));
+        const pairs = await Promise.all(uids.map(async (uid) => {
+          try { const p = await getPlant(uid); return [uid, p]; } catch { return [uid, null]; }
+        }));
+        const map = {};
+        pairs.forEach(([uid, p]) => { if (p) map[uid] = p; });
+        if (!mounted) return;
+        setPlants(map);
+      } catch(e) {} finally { if (mounted) setLoading(false); }
+    })();
+    return () => { mounted = false; };
+  }, []);
+
+  return (
+    <div className={`flex flex-col ${isSmall ? 'p-3' : isDesktop ? 'p-6' : 'p-4'} w-full pb-4 fade-in`}
+      style={{ maxWidth: isDesktop ? '1100px' : '680px', margin: '0 auto' }}>
+      <PlantCard title="ACTIVITY LOG">
+        {loading && <StatusMessage type="loading" message="Loading log..." />}
+        {!loading && items.length === 0 && <StatusMessage type="info" message="No entries yet." />}
+        {!loading && items.length > 0 && (
+          <div className={isDesktop ? "grid grid-cols-2 gap-2 max-h-[65vh] overflow-y-auto" : "space-y-2 max-h-96 overflow-y-auto"}>
+            {items.map((it, idx) => (
+              <div key={idx} className="border-b border-[#C8B488] pb-2">
+                <div style={{ fontFamily:"'Pixelify Sans', cursive", fontSize:'11px', color:'#6B4423' }}>{it.ts}</div>
+                <div style={{ fontFamily:"'Press Start 2P', cursive", fontSize:'10px', color:'#4A3020' }}>{it.action}</div>
+                <div style={{ fontFamily:"'Pixelify Sans', cursive", fontSize:'12px', color:'#4A3020', fontWeight:900 }}
+                  className="cursor-pointer plant-item" onClick={() => navigate('plant', { uid: it.uid })}>
+                  {(plants[it.uid] && plants[it.uid].primary) ? plants[it.uid].primary : it.uid}
+                </div>
+                {it.details && <div style={{ fontFamily:"'Pixelify Sans', cursive", fontSize:'12px', color:'#4A3020' }}>{it.details}</div>}
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="mt-4"><PlantButton variant="ghost" onClick={goBack}>Back</PlantButton></div>
+      </PlantCard>
+    </div>
+  );
+}
+
+/* ===================== BATCH FILTER ===================== */
+function BatchPlantFilter({ plants, selected, toggle, thumbs }) {
+  const [filter, setFilter] = useState('');
+  const pxS = { fontFamily:"'Pixelify Sans', cursive" };
+  const visible = filter.trim()
+    ? (plants || []).filter(p => { const q = filter.trim().toLowerCase(); return (p.primary || p.nickname || p.uid || '').toLowerCase().includes(q) || (p.classification || '').toLowerCase().includes(q) || (p.uid || '').toLowerCase().includes(q); })
+    : (plants || []);
+  return (
+    <div>
+      {(plants || []).length > 4 && (
+        <input value={filter} onChange={e => setFilter(e.target.value)} placeholder="Search plants..."
+          className="w-full mb-2 border-4 border-[#6B4423] rounded-lg p-2 bg-white"
+          style={{ ...pxS, fontSize:'13px', color:'#4A3020' }} />
+      )}
+      <div className="space-y-2 max-h-80 overflow-y-auto">
+        {visible.map(p => (
+          <label key={p.uid} className="flex items-center gap-2 cursor-pointer bg-white border-2 border-[#C8B488] rounded-lg p-2">
+            <input type="checkbox" checked={!!selected[p.uid]} onChange={() => toggle(p.uid)} className="w-4 h-4" />
+            <MiniThumb url={thumbs && thumbs[p.uid]} />
+            <div className="min-w-0">
+              <div style={{ ...pxS, fontSize:'14px', color:'#4A3020', fontWeight:900 }} className="truncate">{p.primary || p.nickname || p.uid}</div>
+              <div style={{ ...pxS, fontSize:'12px', color:'#6B4423', fontWeight:800 }} className="truncate">{p.classification || ''}</div>
+            </div>
+          </label>
+        ))}
+        {visible.length === 0 && (plants || []).length > 0 && <div style={{ ...pxS, color:'#4A3020' }}>No matches.</div>}
+        {(plants || []).length === 0 && <div style={{ ...pxS, color:'#4A3020' }}>No plants in this location.</div>}
+      </div>
+    </div>
+  );
+}
+
+function BatchWaterScreen() {
+  const { goBack } = useNavigation();
+  const { locations, getPlantsByLocation, batchWater, getLatestPhoto } = usePlantData();
+  const { isSmall, isDesktop } = useScreenSize();
+  const [selectedLoc, setSelectedLoc] = useState('');
+  const [plants, setPlants] = useState([]);
+  const [selected, setSelected] = useState({});
+  const [action, setAction] = useState('Watered');
+  const [status, setStatus] = useState(null);
+  const [thumbs, setThumbs] = useState({});
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      if (!selectedLoc) { setPlants([]); setSelected({}); setThumbs({}); return; }
+      try { const ps = await getPlantsByLocation(selectedLoc); if (!alive) return; setPlants(ps || []); setSelected({}); }
+      catch (e) { if (!alive) return; setPlants([]); setSelected({}); }
+    })();
+    return () => { alive = false; };
+  }, [selectedLoc]);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      const next = {};
+      for (let i=0;i<(plants||[]).length;i++){
+        const uid = String(plants[i].uid||''); if (!uid) continue; if (thumbs[uid] || next[uid]) continue;
+        try { const res = await getLatestPhoto(uid); if (res && res.ok && res.photo && res.photo.thumbUrl) next[uid] = res.photo.thumbUrl; } catch(e){}
+      }
+      if (!alive) return; if (Object.keys(next).length) setThumbs(prev => ({...prev, ...next}));
+    })();
+    return () => { alive = false; };
+  }, [plants]);
+
+  function toggle(uid) { setSelected(prev => ({ ...prev, [uid]: !prev[uid] })); }
+  function selectAll() { const all = {}; (plants || []).forEach(p => { all[p.uid] = true; }); setSelected(all); }
+  async function submit() {
+    const uids = Object.keys(selected).filter(uid => selected[uid]); if (!uids.length) return;
+    setStatus({ type:'loading', message:'Saving...' });
+    try { await batchWater(uids, action); setStatus({ type:'success', message:'Saved ✅' }); setTimeout(() => { setStatus(null); goBack(); }, 900); }
+    catch (e) { setStatus({ type:'error', message:'Failed' }); setTimeout(() => setStatus(null), 2000); }
+  }
+
+  return (
+    <div className={`flex flex-col ${isSmall ? 'p-3' : isDesktop ? 'p-6' : 'p-4'} w-full pb-4 fade-in`}
+      style={{ maxWidth: isDesktop ? '1100px' : '680px', margin: '0 auto' }}>
+      <PlantCard title="LOG MULTIPLE WATERINGS">
+        {status && <StatusMessage type={status.type} message={status.message} />}
+        <div className="mb-3">
+          <div style={{ fontFamily:"'Pixelify Sans', cursive", fontSize:'12px', fontWeight:700, color:'#4A3020' }}>Location</div>
+          <select value={selectedLoc} onChange={e => setSelectedLoc(e.target.value)}
+            className="mt-1 w-full border-4 border-[#6B4423] rounded-lg p-2 bg-white"
+            style={{ fontFamily:"'Pixelify Sans', cursive", fontSize:'14px', color:'#4A3020' }}>
+            <option value="">— Select —</option>
+            {locations.map(loc => (<option key={loc} value={loc}>{loc}</option>))}
+          </select>
+        </div>
+        {selectedLoc && (
+          <>
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <button type="button" onClick={selectAll} className="underline" style={{ fontFamily:"'Pixelify Sans', cursive", fontSize:'12px', color:'#4A3020' }}>Select All</button>
+              <select value={action} onChange={e => setAction(e.target.value)} className="border-2 border-[#6B4423] rounded-lg px-2 py-1 bg-white" style={{ fontFamily:"'Pixelify Sans', cursive", fontSize:'12px', color:'#4A3020' }}>
+                <option>Watered</option><option>Watered (light)</option><option>Watered (heavy)</option>
+              </select>
+            </div>
+            <BatchPlantFilter plants={plants} selected={selected} toggle={toggle} thumbs={thumbs} />
+            <div className="mt-4 space-x-2">
+              <PlantButton onClick={submit}>💧 Apply</PlantButton>
+              <PlantButton variant="ghost" onClick={goBack}>Cancel</PlantButton>
+            </div>
+          </>
+        )}
+        {!selectedLoc && <div className="mt-2" style={{ fontFamily:"'Pixelify Sans', cursive", color:'#4A3020' }}>Select a location to log multiple waterings.</div>}
+      </PlantCard>
+    </div>
+  );
+}
+
+function BatchFertilizeScreen() {
+  const { goBack } = useNavigation();
+  const { locations, getPlantsByLocation, batchFertilize, getLatestPhoto } = usePlantData();
+  const { isSmall, isDesktop } = useScreenSize();
+  const [selectedLoc, setSelectedLoc] = useState('');
+  const [plants, setPlants] = useState([]);
+  const [selected, setSelected] = useState({});
+  const [action, setAction] = useState('Fertilized');
+  const [status, setStatus] = useState(null);
+  const [thumbs, setThumbs] = useState({});
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      if (!selectedLoc) { setPlants([]); setSelected({}); setThumbs({}); return; }
+      try { const ps = await getPlantsByLocation(selectedLoc); if (!alive) return; setPlants(ps || []); setSelected({}); }
+      catch (e) { if (!alive) return; setPlants([]); setSelected({}); }
+    })();
+    return () => { alive = false; };
+  }, [selectedLoc]);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      const next = {};
+      for (let i=0;i<(plants||[]).length;i++){
+        const uid = String(plants[i].uid||''); if (!uid) continue; if (thumbs[uid] || next[uid]) continue;
+        try { const res = await getLatestPhoto(uid); if (res && res.ok && res.photo && res.photo.thumbUrl) next[uid] = res.photo.thumbUrl; } catch(e){}
+      }
+      if (!alive) return; if (Object.keys(next).length) setThumbs(prev => ({...prev, ...next}));
+    })();
+    return () => { alive = false; };
+  }, [plants]);
+
+  function toggle(uid) { setSelected(prev => ({ ...prev, [uid]: !prev[uid] })); }
+  function selectAll() { const all = {}; (plants || []).forEach(p => { all[p.uid] = true; }); setSelected(all); }
+  async function submit() {
+    const uids = Object.keys(selected).filter(uid => selected[uid]); if (!uids.length) return;
+    setStatus({ type:'loading', message:'Saving...' });
+    try { await batchFertilize(uids, action); setStatus({ type:'success', message:'Saved ✅' }); setTimeout(() => { setStatus(null); goBack(); }, 900); }
+    catch (e) { setStatus({ type:'error', message:'Failed' }); setTimeout(() => setStatus(null), 2000); }
+  }
+
+  return (
+    <div className={`flex flex-col ${isSmall ? 'p-3' : isDesktop ? 'p-6' : 'p-4'} w-full pb-4 fade-in`}
+      style={{ maxWidth: isDesktop ? '1100px' : '680px', margin: '0 auto' }}>
+      <PlantCard title="LOG MULTIPLE FERTILIZING">
+        {status && <StatusMessage type={status.type} message={status.message} />}
+        <div className="mb-3">
+          <div style={{ fontFamily:"'Pixelify Sans', cursive", fontSize:'12px', fontWeight:700, color:'#4A3020' }}>Location</div>
+          <select value={selectedLoc} onChange={e => setSelectedLoc(e.target.value)}
+            className="mt-1 w-full border-4 border-[#6B4423] rounded-lg p-2 bg-white"
+            style={{ fontFamily:"'Pixelify Sans', cursive", fontSize:'14px', color:'#4A3020' }}>
+            <option value="">— Select —</option>
+            {locations.map(loc => (<option key={loc} value={loc}>{loc}</option>))}
+          </select>
+        </div>
+        {selectedLoc && (
+          <>
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <button type="button" onClick={selectAll} className="underline" style={{ fontFamily:"'Pixelify Sans', cursive", fontSize:'12px', color:'#4A3020' }}>Select All</button>
+              <select value={action} onChange={e => setAction(e.target.value)} className="border-2 border-[#6B4423] rounded-lg px-2 py-1 bg-white" style={{ fontFamily:"'Pixelify Sans', cursive", fontSize:'12px', color:'#4A3020' }}>
+                <option>Fertilized</option><option>Fertilized (light)</option><option>Fertilized (heavy)</option>
+              </select>
+            </div>
+            <BatchPlantFilter plants={plants} selected={selected} toggle={toggle} thumbs={thumbs} />
+            <div className="mt-4 space-x-2">
+              <PlantButton variant="secondary" onClick={submit}>🌾 Apply</PlantButton>
+              <PlantButton variant="ghost" onClick={goBack}>Cancel</PlantButton>
+            </div>
+          </>
+        )}
+        {!selectedLoc && <div className="mt-2" style={{ fontFamily:"'Pixelify Sans', cursive", color:'#4A3020' }}>Select a location to log multiple fertilizing.</div>}
+      </PlantCard>
+    </div>
+  );
+}
+
+/* ===================== PHOTO HELPERS ===================== */
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result || ''));
+    r.onerror = () => reject(new Error('Failed to read file'));
+    r.readAsDataURL(file);
+  });
+}
+
+function loadImageFromDataUrl(dataUrl) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error('Image decode failed (maybe HEIC)'));
+    img.src = dataUrl;
+  });
+}
+
+async function compressImageToJpegDataUrl(file, maxDim = 1600, quality = 0.82) {
+  const dataUrl = await readFileAsDataUrl(file);
+  if (!dataUrl.startsWith('data:image/')) throw new Error('Not an image');
+  const nameLower = String(file.name || '').toLowerCase();
+  if (nameLower.endsWith('.heic') || nameLower.endsWith('.heif') || (file.type && file.type.includes('heic'))) {
+    throw new Error('HEIC not supported here. Choose a JPG/PNG.');
+  }
+  const img = await loadImageFromDataUrl(dataUrl);
+  const w0 = img.naturalWidth || img.width;
+  const h0 = img.naturalHeight || img.height;
+  const scale = Math.min(1, maxDim / Math.max(w0, h0));
+  const w = Math.max(1, Math.round(w0 * scale));
+  const h = Math.max(1, Math.round(h0 * scale));
+  const canvas = document.createElement('canvas');
+  canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(img, 0, 0, w, h);
+  return canvas.toDataURL('image/jpeg', quality);
+}
+
+/* ===================== PLANT SCREEN ===================== */
+function PlantScreen({ uid }) {
+  const { navigate } = useNavigation();
+  const { getPlant, getTimeline, quickLog, updatePlant, setNickname, getLatestPhoto, uploadPlantPhoto } = usePlantData();
+  const { isSmall, isDesktop } = useScreenSize();
+
+  const [plant, setPlant] = useState(null);
+  const [timeline, setTimeline] = useState([]);
+  const [state, setState] = useState('loading');
+  const [msg, setMsg] = useState(null);
+  const [photo, setPhoto] = useState(null);
+  const [photoMsg, setPhotoMsg] = useState(null);
+  const fileRef = useRef(null);
+  const safe = safeUid(uid);
+
+  const [repotOpen, setRepotOpen] = useState(false);
+  const [repotPot, setRepotPot] = useState('');
+  const [repotSub, setRepotSub] = useState('');
+  const [nickOpen, setNickOpen] = useState(false);
+  const [nickVal, setNickVal] = useState('');
+  const [editOpen, setEditOpen] = useState(false);
+  const [diaryExpanded, setDiaryExpanded] = useState(false);
+  const [editGenus, setEditGenus] = useState('');
+  const [editTaxon, setEditTaxon] = useState('');
+  const [editCls, setEditCls] = useState('');
+  const [editLoc, setEditLoc] = useState('');
+  const [editPot, setEditPot] = useState('');
+  const [editSub, setEditSub] = useState('');
+  const [editWaterEvery, setEditWaterEvery] = useState('');
+  const [editFertEvery, setEditFertEvery] = useState('');
+  const [editBirthday, setEditBirthday] = useState('');
+  const [logNotes, setLogNotes] = useState('');
+  const [logWater, setLogWater] = useState(false);
+  const [logFert, setLogFert] = useState(false);
+
+  async function refreshLatestPhoto() {
+    try {
+      if (!safe) { setPhoto(null); return; }
+      const res = await getLatestPhoto(safe);
+      if (res && res.ok && res.photo) setPhoto(res.photo);
+      else setPhoto(null);
+    } catch (e) { setPhoto(null); }
+  }
+
+  async function loadCurrent() {
+    if (!safe) { setState('loading'); setPlant(null); return; }
+    try {
+      setState('loading');
+      const p = await getPlant(safe);
+      if (!p) { setState('error'); setMsg({ type:'error', text:'Plant not found' }); return; }
+      setPlant(p); setState('ready');
+      const tl = await getTimeline(safe, 30);
+      setTimeline(tl || []);
+      await refreshLatestPhoto();
+    } catch (e) { setState('error'); setMsg({ type:'error', text:'Plant not found (runtime error)' }); }
+  }
+
+  useEffect(() => { loadCurrent(); }, [safe]);
+
+  async function doCommit() {
+    if (!plant || (!logWater && !logFert)) return;
+    const label = logWater && logFert ? 'Water + Fertilize' : logWater ? 'Water' : 'Fertilize';
+    setMsg({ type:'loading', text:`Logging ${label}...` });
+    const note = logNotes.trim(); setLogNotes('');
+    setLogWater(false); setLogFert(false);
+    try {
+      await quickLog(plant.uid, { water: logWater, fertilize: logFert, repot: false, notes: note });
+      await loadCurrent();
+      setMsg({ type:'success', text:`${label} logged!` });
+    } catch { setMsg({ type:'error', text:'Failed' }); }
+    setTimeout(()=> setMsg(null), 1500);
+  }
+
+  // kept for internal / batch use
+  async function doWater() {
+    if (!plant) return;
+    setMsg({ type:'loading', text:'Saving...' });
+    const note = logNotes.trim(); setLogNotes('');
+    try { await quickLog(plant.uid, { water:true, fertilize:false, repot:false, notes: note }); await loadCurrent(); setMsg({ type:'success', text:'Saved' }); }
+    catch { setMsg({ type:'error', text:'Failed' }); }
+    setTimeout(()=> setMsg(null), 1300);
+  }
+
+  async function doFert() {
+    if (!plant) return;
+    setMsg({ type:'loading', text:'Saving...' });
+    const note = logNotes.trim(); setLogNotes('');
+    try { await quickLog(plant.uid, { water:false, fertilize:true, repot:false, notes: note }); await loadCurrent(); setMsg({ type:'success', text:'Saved' }); }
+    catch { setMsg({ type:'error', text:'Failed' }); }
+    setTimeout(()=> setMsg(null), 1300);
+  }
+
+  async function doNote() {
+    if (!plant || !logNotes.trim()) return;
+    setMsg({ type:'loading', text:'Saving note...' });
+    const note = logNotes.trim(); setLogNotes('');
+    try {
+      await quickLog(plant.uid, { water:false, fertilize:false, repot:false, note:true, notes: note });
+      const tl = await getTimeline(safe, 30);
+      setTimeline(tl || []);
+      setMsg({ type:'success', text:'Note saved ✅' });
+    } catch { setMsg({ type:'error', text:'Failed' }); }
+    setTimeout(()=> setMsg(null), 1300);
+  }
+
+  function openPhotoPicker() { if (fileRef.current) fileRef.current.click(); }
+
+  async function onPhotoPicked(e) {
+    const file = (e.target.files && e.target.files[0]) ? e.target.files[0] : null;
+    e.target.value = '';
+    if (!file || !plant) return;
+    setPhotoMsg({ type:'loading', text:'Uploading photo...' });
+    try {
+      const dataUrl = await compressImageToJpegDataUrl(file, 1600, 0.82);
+      const res = await uploadPlantPhoto(plant.uid, dataUrl, file.name || 'photo.jpg');
+      if (res && res.ok) { setPhotoMsg({ type:'success', text:'Photo added ✅' }); await refreshLatestPhoto(); }
+      else setPhotoMsg({ type:'error', text: (res && res.reason) ? res.reason : 'Upload failed' });
+    } catch (err) { setPhotoMsg({ type:'error', text: (err && err.message) ? err.message : 'Upload failed' }); }
+    setTimeout(()=> setPhotoMsg(null), 2000);
+  }
+
+  function openEdit(p) {
+    setEditGenus(p.genus || ''); setEditTaxon(p.species || p.taxon || ''); setEditCls(p.classification || '');
+    setEditLoc(p.location || ''); setEditPot(p.potSize || ''); setEditSub(p.substrate || p.medium || '');
+    setEditWaterEvery(p.everyDays || p.every || ''); setEditFertEvery(p.fertilizeEveryDays || '');
+    setEditBirthday(p.birthday || ''); setEditOpen(true);
+  }
+
+  async function submitNick() {
+    if (!plant || !nickVal.trim()) return;
+    setMsg({ type:'loading', text:'Saving...' }); setNickOpen(false);
+    try { await setNickname(plant.uid, nickVal.trim()); setNickVal(''); await loadCurrent(); setMsg({ type:'success', text:'Saved ✅' }); }
+    catch { setMsg({ type:'error', text:'Failed' }); }
+    setTimeout(() => setMsg(null), 1300);
+  }
+
+  async function submitRepot() {
+    if (!plant) return;
+    setMsg({ type:'loading', text:'Saving...' });
+    const note = logNotes.trim(); setLogNotes(''); setRepotOpen(false);
+    try {
+      await quickLog(plant.uid, { repot:true, potSize:repotPot, substrate:repotSub, notes: note });
+      await updatePlant(plant.uid, { potSize:repotPot, substrate:repotSub });
+      await loadCurrent(); setMsg({ type:'success', text:'Saved ✅' });
+    } catch { setMsg({ type:'error', text:'Failed' }); }
+    setTimeout(() => setMsg(null), 1300);
+  }
+
+  async function submitEdit() {
+    if (!plant) return;
+    setMsg({ type:'loading', text:'Saving...' }); setEditOpen(false);
+    try {
+      await updatePlant(plant.uid, {
+        genus: editGenus, taxon: editTaxon, classification: editCls,
+        location: editLoc, potSize: editPot, substrate: editSub,
+        everyDays: editWaterEvery, fertilizeEveryDays: editFertEvery,
+        birthday: editBirthday, recomputeDue: true
+      });
+      await loadCurrent(); setMsg({ type:'success', text:'Saved ✅' });
+    } catch { setMsg({ type:'error', text:'Failed' }); }
+    setTimeout(() => setMsg(null), 1300);
+  }
+
+  function dueColor(due) {
+    if (!due) return '#999';
+    const today = new Date(); today.setHours(0,0,0,0);
+    const d = new Date(due);
+    if (isNaN(d.getTime())) return '#999';
+    const diff = Math.floor((d - today) / 86400000);
+    if (diff < 0) return '#c0392b';
+    if (diff <= 3) return '#e67e22';
+    return '#2A4A1A';
+  }
+
+  const pxS = { fontFamily:"'Pixelify Sans', cursive" };
+  const px8S = { fontFamily:"'Press Start 2P', cursive", fontSize:'10px' };
+
+  if (!safe) {
+    return (
+      <div className={`flex flex-col ${isSmall ? 'p-3' : 'p-4'} max-w-2xl mx-auto w-full`}>
+        <PlantCard title="PLANT"><StatusMessage type="loading" message="Loading plant..." /></PlantCard>
+      </div>
+    );
+  }
+
+  return (
+    <div className={`flex flex-col ${isSmall ? 'p-3' : isDesktop ? 'p-6' : 'p-4'} w-full pb-4 fade-in`}
+      style={{ maxWidth: isDesktop ? '1100px' : '680px', margin: '0 auto' }}>
+
+      {state === 'loading' && <PlantCard><StatusMessage type="loading" message="Loading specimen..." /></PlantCard>}
+      {state === 'error'   && <PlantCard title="PLANT"><StatusMessage type="error" message="Plant not found" />{msg && <StatusMessage type={msg.type} message={msg.text} />}</PlantCard>}
+      {state === 'ready' && msg && <div className="mb-2"><StatusMessage type={msg.type} message={msg.text} /></div>}
+      {photoMsg && <div className="mb-2"><StatusMessage type={photoMsg.type} message={photoMsg.text} /></div>}
+
+      <input ref={fileRef} type="file" accept="image/*" capture="environment" style={{ display:'none' }} onChange={onPhotoPicked} />
+
+      {plant && (<>
+        {/* ── Desktop: 2-col (hero+diary left, log right) | Mobile: stacked ── */}
+        {isDesktop ? (
+          <div className="grid gap-4 items-start" style={{ gridTemplateColumns: '1fr 400px' }}>
+            {/* LEFT: hero card + diary */}
+            <div className="flex flex-col gap-3">
+              {/* ══ HERO CARD: PROFILE + CARE + DETAILS in one tan card ══ */}
+        <div className="bg-gradient-to-b from-[#F4E4C1] to-[#E8D4A8] rounded-xl border-8 border-[#6B4423] shadow-lg p-4 mb-3">
+          {(() => {
+            const titleLine = plant.nickname
+              ? String(plant.nickname).trim()
+              : cleanDisplayName(getTaxLine(plant) || plant.primary || plant.uid);
+            const taxLine = cleanDisplayName(getTaxLine(plant));
+            const showTax = !!(plant.nickname && taxLine && normStr(taxLine) !== normStr(titleLine));
+
+            // 4:5 portrait photo (like iPhone portrait) — image inside auto-fits via object-contain
+            const photoW = isSmall ? 148 : 180;
+            const photoH = Math.round(photoW * 5 / 4);
+
+            return (
+              <div className={isSmall ? "flex flex-col gap-3" : "flex items-start gap-4"}>
+                {/* Photo — 4:5 portrait */}
+                <div className="shrink-0 flex flex-col gap-2" style={{ width: photoW + "px" }}>
+                  <button type="button"
+                    onClick={() => { if (photo && photo.viewUrl) window.open(photo.viewUrl, '_blank'); }}
+                    className="rounded-lg border-4 border-[#6B4423] overflow-hidden bg-[#1a1a1a] hover:opacity-90"
+                    style={{ width: photoW + "px", height: photoH + "px", cursor:(photo && photo.viewUrl)?'pointer':'default', display:'flex', alignItems:'center', justifyContent:'center' }}
+                    title={photo && photo.viewUrl ? "Open photo" : ""}>
+                    {photo && photo.thumbUrl
+                      ? <img src={photo.thumbUrl} alt="plant"
+                          style={{ width:'100%', height:'100%', objectFit:'contain', objectPosition:'center' }} />
+                      : <div style={{ ...pxS, fontSize:'11px', fontWeight:900, color:'#6B4423', textAlign:'center', padding:'8px' }}>
+                          No photo yet
+                        </div>
+                    }
+                  </button>
+
+                  {/* ── Mini diary — lives below the photo ── */}
+                  <div className="bg-white rounded-lg border-2 border-[#C8B488] shadow-sm p-2 flex flex-col gap-1"
+                    style={{ width: photoW + "px" }}>
+                    <div className="flex items-center justify-between mb-1">
+                      <div style={{ ...px8S, fontSize:'8px', color:'#4A3020' }}>DIARY</div>
+                      <button type="button"
+                        onClick={() => navigate('diary', { uid: plant.uid, name: plant.primary || plant.uid })}
+                        className="underline"
+                        style={{ ...pxS, fontSize:'11px', color:'#6B4423', fontWeight:900 }}>
+                        Full diary ›
+                      </button>
+                    </div>
+                    {timeline.slice(0, 6).map((t, i) => {
+                      const icons = { WATER:'💧', FERTILIZE:'🌾', REPOT:'🪴', NOTE:'📝', UPDATE:'✏️', CREATE:'🌱', REPAIR:'🔧', PHOTO:'📸' };
+                      return (
+                        <div key={i} className="flex gap-1 border-b border-[#f0f0f0] pb-1 last:border-0 last:pb-0">
+                          <span style={{ fontSize:'12px', lineHeight:1.3 }}>{icons[t.action] || '•'}</span>
+                          <div className="flex-1 min-w-0">
+                            {t.action === 'NOTE'
+                              ? <div style={{ ...pxS, fontSize:'10px', color:'#4A3020', fontWeight:700 }} className="truncate">{t.details || '(note)'}</div>
+                              : <><div style={{ ...pxS, fontSize:'10px', fontWeight:900, color:'#4A3020' }} className="truncate">{t.action}</div>
+                                {t.details && <div style={{ ...pxS, fontSize:'10px', color:'#6B4423' }} className="truncate">{t.details}</div>}</>
+                            }
+                            <div style={{ ...pxS, fontSize:'9px', color:'#bbb' }}>{t.ts}</div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {timeline.length === 0 && (
+                      <div style={{ ...pxS, fontSize:'11px', color:'#bbb' }}>No entries yet</div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Right column: name + actions + combined care+details panel */}
+                <div className="flex-1 min-w-0">
+                  <div style={{ ...pxS, fontSize: isSmall ? '17px' : '20px', fontWeight:900, color:'#2A4A1A', lineHeight:1.2 }}>{titleLine}</div>
+                  {showTax && <div style={{ ...pxS, fontSize:'13px', color:'#6B4423', fontWeight:800 }} className="truncate">{taxLine}</div>}
+                  <div style={{ ...pxS, fontSize:'11px', color:'#aaa', marginTop:'2px' }}>{plant.location ? `📍 ${plant.location}  •  ` : ''}UID {plant.uid}</div>
+
+                  {/* Quick action buttons */}
+                  <div className="flex gap-2 mt-3 flex-wrap">
+                    <PlantButton onClick={openPhotoPicker} className="px-3 py-1" variant="secondary">📸 Add Photo</PlantButton>
+                    <PlantButton variant="ghost" className="px-3 py-1"
+                      onClick={() => { if (plant.folderUrl) window.open(plant.folderUrl, '_blank'); else setMsg({ type:'info', text:'No folder yet.' }); }}>
+                      🖼️ Gallery
+                    </PlantButton>
+                    <PlantButton variant="ghost" className="px-3 py-1"
+                      onClick={() => { setNickOpen(v => !v); setNickVal(plant.nickname || ''); }}>
+                      {plant.nickname ? '✏️ Change Nickname' : '✏️ Add Nickname'}
+                    </PlantButton>
+                  </div>
+
+                  {nickOpen && (
+                    <div className="mt-3 flex gap-2">
+                      <input value={nickVal} onChange={e => setNickVal(e.target.value)} placeholder="Enter nickname..."
+                        className="flex-1 border-4 border-[#6B4423] rounded-lg px-3 py-2 bg-white input-depth"
+                        style={{ ...pxS, fontSize:'13px' }} />
+                      <PlantButton onClick={submitNick} disabled={!nickVal.trim()}>Save</PlantButton>
+                      <PlantButton variant="ghost" onClick={() => setNickOpen(false)}>✕</PlantButton>
+                    </div>
+                  )}
+
+                  {/* ── Combined CARE + DETAILS panel (single white box) ── */}
+                  <div className="mt-4 bg-white rounded-xl border-4 border-[#7BB5CC] shadow p-3">
+                    {/* CARE section */}
+                    <div style={{ ...px8S, color:'#1A3A4A', marginBottom:'8px' }}>CARE</div>
+                    <div className={`grid gap-x-4 gap-y-1 mb-4 ${isSmall ? 'grid-cols-2' : 'grid-cols-2'}`}>
+                      <div style={{ ...pxS, fontSize:'12px', color:'#666' }}>💧 Last Watered</div>
+                      <div style={{ ...pxS, fontSize:'12px', fontWeight:700, color:'#2A4A1A' }}>{plant.lastWatered || '—'}</div>
+                      <div style={{ ...pxS, fontSize:'12px', color:'#666' }}>📅 Next Due</div>
+                      <div style={{ ...pxS, fontSize:'12px', fontWeight:700, color: dueColor(plant.due) }}>{plant.due || '—'}</div>
+                      <div style={{ ...pxS, fontSize:'12px', color:'#666' }}>🔁 Water Every</div>
+                      <div style={{ ...pxS, fontSize:'12px', fontWeight:700, color:'#2A4A1A' }}>{(plant.everyDays || plant.every) ? `${plant.everyDays || plant.every}d` : '—'}</div>
+                      <div style={{ ...pxS, fontSize:'12px', color:'#666' }}>🌾 Last Fertilized</div>
+                      <div style={{ ...pxS, fontSize:'12px', fontWeight:700, color:'#2A4A1A' }}>{plant.lastFertilized || '—'}</div>
+                      {plant.fertilizeEveryDays && (<>
+                        <div style={{ ...pxS, fontSize:'12px', color:'#666' }}>🔁 Fert Every</div>
+                        <div style={{ ...pxS, fontSize:'12px', fontWeight:700, color:'#2A4A1A' }}>{plant.fertilizeEveryDays}d</div>
+                      </>)}
+                      <div style={{ ...pxS, fontSize:'12px', color:'#666' }}>🪴 Last Repotted</div>
+                      <div style={{ ...pxS, fontSize:'12px', fontWeight:700, color:'#2A4A1A' }}>{plant.lastRepotted || '—'}</div>
+                    </div>
+
+                    {/* Divider */}
+                    <div className="border-t-2 border-[#7BB5CC] mb-3" />
+
+                    {/* DETAILS section */}
+                    <div style={{ ...px8S, color:'#4A3020', marginBottom:'8px' }}>DETAILS</div>
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+                      <div style={{ ...pxS, fontSize:'12px', color:'#666' }}>🎂 Birthday</div>
+                      <div style={{ ...pxS, fontSize:'12px', fontWeight:700, color:'#2A4A1A' }}>{plant.birthday || '—'}</div>
+                      <div style={{ ...pxS, fontSize:'12px', color:'#666' }}>🪴 Pot Size</div>
+                      <div style={{ ...pxS, fontSize:'12px', fontWeight:700, color:'#2A4A1A' }}>{plant.potSize || '—'}</div>
+                      <div style={{ ...pxS, fontSize:'12px', color:'#666' }}>🧱 Substrate</div>
+                      <div style={{ ...pxS, fontSize:'12px', fontWeight:700, color:'#2A4A1A' }}>{plant.substrate || plant.medium || '—'}</div>
+                    </div>
+
+                    {/* Drive links */}
+                    {(plant.careDocUrl || plant.folderUrl) && (
+                      <div className="mt-3 space-y-1 pt-2 border-t border-[#e0e0e0]">
+                        {plant.careDocUrl && <a href={plant.careDocUrl} target="_blank" style={{ ...pxS, fontSize:'12px', color:'#2980b9', fontWeight:900, display:'block' }}>📄 Open Care Log Doc</a>}
+                        {plant.folderUrl && <a href={plant.folderUrl} target="_blank" style={{ ...pxS, fontSize:'12px', color:'#2980b9', fontWeight:900, display:'block' }}>🗂️ Open Plant Folder</a>}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+        </div>
+
+            </div>
+            {/* RIGHT: log actions */}
+            <div className="flex flex-col gap-3">
+              {/* LOG ACTIONS */}
+        <div className="bg-white rounded-xl border-4 border-[#6B9C3D] shadow p-3 mb-3">
+          <div style={{ ...px8S, color:'#2A4A1A', marginBottom:'10px' }}>LOG</div>
+
+          {/* ── Toggle row ── */}
+          <div className="grid grid-cols-2 gap-2 mb-3">
+            <button type="button"
+              onClick={() => setLogWater(v => !v)}
+              className={`py-3 rounded-xl border-4 transition-all ${logWater
+                ? 'bg-[#2980b9] border-[#1a6fa0] text-white scale-[0.97]'
+                : 'bg-white border-[#C8B488] text-[#4A3020] hover:bg-blue-50'}`}
+              style={{ ...pxS, fontWeight:900, fontSize:'15px' }}>
+              💧 Water
+            </button>
+            <button type="button"
+              onClick={() => setLogFert(v => !v)}
+              className={`py-3 rounded-xl border-4 transition-all ${logFert
+                ? 'bg-[#8B4513] border-[#6B3010] text-white scale-[0.97]'
+                : 'bg-white border-[#C8B488] text-[#4A3020] hover:bg-amber-50'}`}
+              style={{ ...pxS, fontWeight:900, fontSize:'15px' }}>
+              🌾 Fertilize
+            </button>
+          </div>
+
+          {/* ── Notes ── */}
+          <textarea value={logNotes} onChange={e => setLogNotes(e.target.value)}
+            placeholder="Add a note (optional)..." rows={2}
+            className="w-full border-4 border-[#6B4423] rounded-lg px-3 py-2 bg-white mb-3 resize-none input-depth"
+            style={{ ...pxS, fontSize:'13px', color:'#4A3020' }} />
+
+          {/* ── Dynamic commit button ── */}
+          {(logWater || logFert) && (
+            <button type="button" onClick={doCommit}
+              className="w-full py-4 rounded-xl border-4 border-[#4A7A1A] bg-[#6B9C3D] hover:bg-[#5A8C2D] active:scale-[0.97] transition-all mb-3 shadow-lg"
+              style={{ ...pxS, fontWeight:900, fontSize:'16px', color:'#fff' }}>
+              {logWater && logFert ? '💧🌾 Log Water + Fertilize'
+               : logWater ? '💧 Log Water'
+               : '🌾 Log Fertilize'}
+            </button>
+          )}
+          {!logWater && !logFert && (
+            <div className="w-full py-3 rounded-xl border-4 border-dashed border-[#C8B488] mb-3 text-center"
+              style={{ ...pxS, fontSize:'12px', color:'#aaa', fontWeight:900 }}>
+              tap to select what you did
+            </div>
+          )}
+
+          {/* ── Secondary actions row ── */}
+          <div className="grid grid-cols-3 gap-2">
+            <PlantButton onClick={doNote} disabled={!logNotes.trim()} className="py-2">📝 Note</PlantButton>
+            <PlantButton onClick={() => { setRepotOpen(v => !v); setRepotPot(plant.potSize||''); setRepotSub(plant.substrate||plant.medium||''); }} className="py-2">🪴 Repot</PlantButton>
+            <PlantButton variant="secondary" onClick={() => openEdit(plant)} className="py-2">✏️ Edit</PlantButton>
+          </div>
+        </div>
+
+
+        {repotOpen && (
+          <div className="bg-white rounded-xl border-4 border-[#8B4513] shadow p-3 mb-3">
+            <div style={{ ...px8S, color:'#4A3020', marginBottom:'8px' }}>REPOT</div>
+            <div className="space-y-2">
+              <div>
+                <div style={{ ...pxS, fontSize:'11px', color:'#6B4423', fontWeight:800 }}>New Pot Size</div>
+                <input value={repotPot} onChange={e => setRepotPot(e.target.value)} placeholder="e.g. 6 inch"
+                  className="w-full border-4 border-[#6B4423] rounded-lg px-3 py-2 bg-white mt-1 input-depth" style={{ ...pxS, fontSize:'13px' }} />
+              </div>
+              <div>
+                <div style={{ ...pxS, fontSize:'11px', color:'#6B4423', fontWeight:800 }}>New Substrate</div>
+                <input value={repotSub} onChange={e => setRepotSub(e.target.value)} placeholder="e.g. pumice + bark"
+                  className="w-full border-4 border-[#6B4423] rounded-lg px-3 py-2 bg-white mt-1 input-depth" style={{ ...pxS, fontSize:'13px' }} />
+              </div>
+              <div className="flex gap-2 pt-1">
+                <PlantButton onClick={submitRepot}>Save Repot</PlantButton>
+                <PlantButton variant="ghost" onClick={() => setRepotOpen(false)}>Cancel</PlantButton>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {editOpen && (
+          <div className="bg-white rounded-xl border-4 border-[#C8B488] shadow p-3 mb-3">
+            <div style={{ ...px8S, color:'#4A3020', marginBottom:'8px' }}>EDIT DETAILS</div>
+            <div className="space-y-2">
+              {[
+                ['Genus', editGenus, setEditGenus, 'e.g. Alocasia'],
+                ['Species / Taxon', editTaxon, setEditTaxon, 'e.g. baginda'],
+                ['Classification', editCls, setEditCls, 'e.g. Araceae'],
+                ['Location', editLoc, setEditLoc, ''],
+                ['Pot Size', editPot, setEditPot, 'e.g. 6 inch'],
+                ['Substrate', editSub, setEditSub, ''],
+                ['Water Every (days)', editWaterEvery, setEditWaterEvery, 'e.g. 7'],
+                ['Fertilize Every (days)', editFertEvery, setEditFertEvery, 'e.g. 30'],
+                ['Birthday (YYYY-MM-DD)', editBirthday, setEditBirthday, ''],
+              ].map(([label, val, setter, ph]) => (
+                <div key={label}>
+                  <div style={{ ...pxS, fontSize:'11px', color:'#6B4423', fontWeight:800 }}>{label}</div>
+                  <input value={val} onChange={e => setter(e.target.value)} placeholder={ph}
+                    className="w-full border-4 border-[#6B4423] rounded-lg px-3 py-2 bg-white mt-1 input-depth"
+                    style={{ ...pxS, fontSize:'13px' }} />
+                </div>
+              ))}
+              <div className="flex gap-2 pt-1">
+                <PlantButton onClick={submitEdit}>Save Changes</PlantButton>
+                <PlantButton variant="ghost" onClick={() => setEditOpen(false)}>Cancel</PlantButton>
+              </div>
+            </div>
+          </div>
+        )}
+            </div>
+          </div>
+        ) : (
+          <>
+            {/* ══ HERO CARD: PROFILE + CARE + DETAILS in one tan card ══ */}
+        <div className="bg-gradient-to-b from-[#F4E4C1] to-[#E8D4A8] rounded-xl border-8 border-[#6B4423] shadow-lg p-4 mb-3">
+          {(() => {
+            const titleLine = plant.nickname
+              ? String(plant.nickname).trim()
+              : cleanDisplayName(getTaxLine(plant) || plant.primary || plant.uid);
+            const taxLine = cleanDisplayName(getTaxLine(plant));
+            const showTax = !!(plant.nickname && taxLine && normStr(taxLine) !== normStr(titleLine));
+
+            // 16:9 photo dimensions
+            const photoH = isSmall ? 132 : 180;
+            const photoW = Math.round(photoH * 16 / 9);
+
+            return (
+              <div className={isSmall ? "flex flex-col gap-3" : "flex items-start gap-4"}>
+                {/* Photo — 16:9 */}
+                <div className="shrink-0 flex flex-col gap-2">
+                  <button type="button"
+                    onClick={() => { if (photo && photo.viewUrl) window.open(photo.viewUrl, '_blank'); }}
+                    className="rounded-lg border-4 border-[#6B4423] overflow-hidden bg-[#F4E4C1] hover:opacity-90"
+                    style={{ width: photoW + "px", height: photoH + "px", cursor:(photo && photo.viewUrl)?'pointer':'default' }}
+                    title={photo && photo.viewUrl ? "Open photo" : ""}>
+                    {photo && photo.thumbUrl
+                      ? <img src={photo.thumbUrl} alt="plant" className="w-full h-full object-cover" />
+                      : <div className="w-full h-full flex items-center justify-center"
+                          style={{ ...pxS, fontSize:'11px', fontWeight:900, color:'#6B4423', textAlign:'center', padding:'8px' }}>
+                          No photo yet
+                        </div>
+                    }
+                  </button>
+                </div>
+
+                {/* Right column: name + actions + combined care+details panel */}
+                <div className="flex-1 min-w-0">
+                  <div style={{ ...pxS, fontSize: isSmall ? '17px' : '20px', fontWeight:900, color:'#2A4A1A', lineHeight:1.2 }}>{titleLine}</div>
+                  {showTax && <div style={{ ...pxS, fontSize:'13px', color:'#6B4423', fontWeight:800 }} className="truncate">{taxLine}</div>}
+                  <div style={{ ...pxS, fontSize:'11px', color:'#aaa', marginTop:'2px' }}>{plant.location ? `📍 ${plant.location}  •  ` : ''}UID {plant.uid}</div>
+
+                  {/* Quick action buttons */}
+                  <div className="flex gap-2 mt-3 flex-wrap">
+                    <PlantButton onClick={openPhotoPicker} className="px-3 py-1" variant="secondary">📸 Add Photo</PlantButton>
+                    <PlantButton variant="ghost" className="px-3 py-1"
+                      onClick={() => { if (plant.folderUrl) window.open(plant.folderUrl, '_blank'); else setMsg({ type:'info', text:'No folder yet.' }); }}>
+                      🖼️ Gallery
+                    </PlantButton>
+                    <PlantButton variant="ghost" className="px-3 py-1"
+                      onClick={() => { setNickOpen(v => !v); setNickVal(plant.nickname || ''); }}>
+                      {plant.nickname ? '✏️ Change Nickname' : '✏️ Add Nickname'}
+                    </PlantButton>
+                  </div>
+
+                  {nickOpen && (
+                    <div className="mt-3 flex gap-2">
+                      <input value={nickVal} onChange={e => setNickVal(e.target.value)} placeholder="Enter nickname..."
+                        className="flex-1 border-4 border-[#6B4423] rounded-lg px-3 py-2 bg-white input-depth"
+                        style={{ ...pxS, fontSize:'13px' }} />
+                      <PlantButton onClick={submitNick} disabled={!nickVal.trim()}>Save</PlantButton>
+                      <PlantButton variant="ghost" onClick={() => setNickOpen(false)}>✕</PlantButton>
+                    </div>
+                  )}
+
+                  {/* ── Combined CARE + DETAILS panel (single white box) ── */}
+                  <div className="mt-4 bg-white rounded-xl border-4 border-[#7BB5CC] shadow p-3">
+                    {/* CARE section */}
+                    <div style={{ ...px8S, color:'#1A3A4A', marginBottom:'8px' }}>CARE</div>
+                    <div className={`grid gap-x-4 gap-y-1 mb-4 ${isSmall ? 'grid-cols-2' : 'grid-cols-2'}`}>
+                      <div style={{ ...pxS, fontSize:'12px', color:'#666' }}>💧 Last Watered</div>
+                      <div style={{ ...pxS, fontSize:'12px', fontWeight:700, color:'#2A4A1A' }}>{plant.lastWatered || '—'}</div>
+                      <div style={{ ...pxS, fontSize:'12px', color:'#666' }}>📅 Next Due</div>
+                      <div style={{ ...pxS, fontSize:'12px', fontWeight:700, color: dueColor(plant.due) }}>{plant.due || '—'}</div>
+                      <div style={{ ...pxS, fontSize:'12px', color:'#666' }}>🔁 Water Every</div>
+                      <div style={{ ...pxS, fontSize:'12px', fontWeight:700, color:'#2A4A1A' }}>{(plant.everyDays || plant.every) ? `${plant.everyDays || plant.every}d` : '—'}</div>
+                      <div style={{ ...pxS, fontSize:'12px', color:'#666' }}>🌾 Last Fertilized</div>
+                      <div style={{ ...pxS, fontSize:'12px', fontWeight:700, color:'#2A4A1A' }}>{plant.lastFertilized || '—'}</div>
+                      {plant.fertilizeEveryDays && (<>
+                        <div style={{ ...pxS, fontSize:'12px', color:'#666' }}>🔁 Fert Every</div>
+                        <div style={{ ...pxS, fontSize:'12px', fontWeight:700, color:'#2A4A1A' }}>{plant.fertilizeEveryDays}d</div>
+                      </>)}
+                      <div style={{ ...pxS, fontSize:'12px', color:'#666' }}>🪴 Last Repotted</div>
+                      <div style={{ ...pxS, fontSize:'12px', fontWeight:700, color:'#2A4A1A' }}>{plant.lastRepotted || '—'}</div>
+                    </div>
+
+                    {/* Divider */}
+                    <div className="border-t-2 border-[#7BB5CC] mb-3" />
+
+                    {/* DETAILS section */}
+                    <div style={{ ...px8S, color:'#4A3020', marginBottom:'8px' }}>DETAILS</div>
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+                      <div style={{ ...pxS, fontSize:'12px', color:'#666' }}>🎂 Birthday</div>
+                      <div style={{ ...pxS, fontSize:'12px', fontWeight:700, color:'#2A4A1A' }}>{plant.birthday || '—'}</div>
+                      <div style={{ ...pxS, fontSize:'12px', color:'#666' }}>🪴 Pot Size</div>
+                      <div style={{ ...pxS, fontSize:'12px', fontWeight:700, color:'#2A4A1A' }}>{plant.potSize || '—'}</div>
+                      <div style={{ ...pxS, fontSize:'12px', color:'#666' }}>🧱 Substrate</div>
+                      <div style={{ ...pxS, fontSize:'12px', fontWeight:700, color:'#2A4A1A' }}>{plant.substrate || plant.medium || '—'}</div>
+                    </div>
+
+                    {/* Drive links */}
+                    {(plant.careDocUrl || plant.folderUrl) && (
+                      <div className="mt-3 space-y-1 pt-2 border-t border-[#e0e0e0]">
+                        {plant.careDocUrl && <a href={plant.careDocUrl} target="_blank" style={{ ...pxS, fontSize:'12px', color:'#2980b9', fontWeight:900, display:'block' }}>📄 Open Care Log Doc</a>}
+                        {plant.folderUrl && <a href={plant.folderUrl} target="_blank" style={{ ...pxS, fontSize:'12px', color:'#2980b9', fontWeight:900, display:'block' }}>🗂️ Open Plant Folder</a>}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+        </div>
+            {/* LOG ACTIONS */}
+        <div className="bg-white rounded-xl border-4 border-[#6B9C3D] shadow p-3 mb-3">
+          <div style={{ ...px8S, color:'#2A4A1A', marginBottom:'8px' }}>LOG</div>
+          <textarea value={logNotes} onChange={e => setLogNotes(e.target.value)}
+            placeholder="Add a note (optional)..." rows={2}
+            className="w-full border-4 border-[#6B4423] rounded-lg px-3 py-2 bg-white mb-3 resize-none input-depth"
+            style={{ ...pxS, fontSize:'13px', color:'#4A3020' }} />
+          <div className="grid grid-cols-2 gap-2">
+            <PlantButton onClick={doWater}>💧 Watered</PlantButton>
+            <PlantButton onClick={doFert}>🌾 Fertilized</PlantButton>
+            <PlantButton onClick={doNote} disabled={!logNotes.trim()}>📝 Note</PlantButton>
+            <PlantButton onClick={() => { setRepotOpen(v => !v); setRepotPot(plant.potSize||''); setRepotSub(plant.substrate||plant.medium||''); }}>🪴 Repot</PlantButton>
+          </div>
+          <div className="mt-2">
+            <PlantButton variant="secondary" onClick={() => openEdit(plant)} className="w-full">✏️ Edit Plant Details</PlantButton>
+          </div>
+        </div>
+
+        {repotOpen && (
+          <div className="bg-white rounded-xl border-4 border-[#8B4513] shadow p-3 mb-3">
+            <div style={{ ...px8S, color:'#4A3020', marginBottom:'8px' }}>REPOT</div>
+            <div className="space-y-2">
+              <div>
+                <div style={{ ...pxS, fontSize:'11px', color:'#6B4423', fontWeight:800 }}>New Pot Size</div>
+                <input value={repotPot} onChange={e => setRepotPot(e.target.value)} placeholder="e.g. 6 inch"
+                  className="w-full border-4 border-[#6B4423] rounded-lg px-3 py-2 bg-white mt-1 input-depth" style={{ ...pxS, fontSize:'13px' }} />
+              </div>
+              <div>
+                <div style={{ ...pxS, fontSize:'11px', color:'#6B4423', fontWeight:800 }}>New Substrate</div>
+                <input value={repotSub} onChange={e => setRepotSub(e.target.value)} placeholder="e.g. pumice + bark"
+                  className="w-full border-4 border-[#6B4423] rounded-lg px-3 py-2 bg-white mt-1 input-depth" style={{ ...pxS, fontSize:'13px' }} />
+              </div>
+              <div className="flex gap-2 pt-1">
+                <PlantButton onClick={submitRepot}>Save Repot</PlantButton>
+                <PlantButton variant="ghost" onClick={() => setRepotOpen(false)}>Cancel</PlantButton>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {editOpen && (
+          <div className="bg-white rounded-xl border-4 border-[#C8B488] shadow p-3 mb-3">
+            <div style={{ ...px8S, color:'#4A3020', marginBottom:'8px' }}>EDIT DETAILS</div>
+            <div className="space-y-2">
+              {[
+                ['Genus', editGenus, setEditGenus, 'e.g. Alocasia'],
+                ['Species / Taxon', editTaxon, setEditTaxon, 'e.g. baginda'],
+                ['Classification', editCls, setEditCls, 'e.g. Araceae'],
+                ['Location', editLoc, setEditLoc, ''],
+                ['Pot Size', editPot, setEditPot, 'e.g. 6 inch'],
+                ['Substrate', editSub, setEditSub, ''],
+                ['Water Every (days)', editWaterEvery, setEditWaterEvery, 'e.g. 7'],
+                ['Fertilize Every (days)', editFertEvery, setEditFertEvery, 'e.g. 30'],
+                ['Birthday (YYYY-MM-DD)', editBirthday, setEditBirthday, ''],
+              ].map(([label, val, setter, ph]) => (
+                <div key={label}>
+                  <div style={{ ...pxS, fontSize:'11px', color:'#6B4423', fontWeight:800 }}>{label}</div>
+                  <input value={val} onChange={e => setter(e.target.value)} placeholder={ph}
+                    className="w-full border-4 border-[#6B4423] rounded-lg px-3 py-2 bg-white mt-1 input-depth"
+                    style={{ ...pxS, fontSize:'13px' }} />
+                </div>
+              ))}
+              <div className="flex gap-2 pt-1">
+                <PlantButton onClick={submitEdit}>Save Changes</PlantButton>
+                <PlantButton variant="ghost" onClick={() => setEditOpen(false)}>Cancel</PlantButton>
+              </div>
+            </div>
+          </div>
+        )}
+            {/* DIARY */}
+        <div className="bg-white rounded-xl border-4 border-[#C8B488] shadow p-3 mb-16">
+          <div style={{ ...px8S, color:'#4A3020', marginBottom:'8px' }}>DIARY</div>
+          <div className="space-y-2 max-h-96 overflow-y-auto">
+            {timeline.map((t, i) => {
+              const icons = { WATER:'💧', FERTILIZE:'🌾', REPOT:'🪴', NOTE:'📝', UPDATE:'✏️', CREATE:'🌱', REPAIR:'🔧', PHOTO:'📸' };
+              return (
+                <div key={i} className="flex gap-2 border-b border-[#eee] pb-2">
+                  <div style={{ fontSize:'18px', lineHeight:1 }}>{icons[t.action] || '•'}</div>
+                  <div className="flex-1">
+                    <div className="flex justify-between">
+                      <div style={{ ...px8S, color:'#4A3020' }}>{t.action}</div>
+                      <div style={{ ...pxS, fontSize:'10px', color:'#aaa' }}>{t.ts}</div>
+                    </div>
+                    {t.details && <div style={{ ...pxS, fontSize:'12px', color:'#6B4423', marginTop:'2px' }}>{t.details}</div>}
+                  </div>
+                </div>
+              );
+            })}
+            {timeline.length === 0 && <div style={{ ...pxS, fontSize:'12px', color:'#aaa' }}>No activity yet.</div>}
+          </div>
+        </div>
+          </>
+        )}
+      </>)}
+    </div>
+  );
+}
+
+/* ===================== DIARY SCREEN ===================== */
+function DiaryScreen({ uid, name }) {
+  const { goBack } = useNavigation();
+  const { getTimeline } = usePlantData();
+  const { isSmall } = useScreenSize();
+  const [timeline, setTimeline] = useState([]);
+  const [loading, setLoading]   = useState(true);
+  const [filter, setFilter]     = useState('all');
+  const safe = safeUid(uid);
+
+  useEffect(() => {
+    if (!safe) { setLoading(false); return; }
+    getTimeline(safe, 200)
+      .then(r => { setTimeline(r || []); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, [safe]);
+
+  const ICONS = { WATER:'💧', FERTILIZE:'🌾', REPOT:'🪴', NOTE:'📝', UPDATE:'✏️', CREATE:'🌱', REPAIR:'🔧', PHOTO:'📸' };
+  const COLORS = {
+    WATER:    { bg:'#e8f4fd', border:'#2980b9', label:'#1a5276' },
+    FERTILIZE:{ bg:'#fef9e7', border:'#f39c12', label:'#7d4e00' },
+    REPOT:    { bg:'#fdebd0', border:'#8B4513', label:'#5a2d0c' },
+    NOTE:     { bg:'#f9f9f9', border:'#aaa',    label:'#555'    },
+    UPDATE:   { bg:'#eaf7ec', border:'#27ae60', label:'#1a5c30' },
+    CREATE:   { bg:'#eaf7ec', border:'#27ae60', label:'#1a5c30' },
+    PHOTO:    { bg:'#f5eef8', border:'#8e44ad', label:'#5b2c6f' },
+    REPAIR:   { bg:'#fdfefe', border:'#717d7e', label:'#333'    },
+  };
+
+  const ACTIONS = ['all','WATER','FERTILIZE','REPOT','NOTE','PHOTO','UPDATE'];
+
+  const visible = filter === 'all'
+    ? timeline
+    : timeline.filter(t => t.action === filter);
+
+  const pxS = { fontFamily:"'Pixelify Sans', cursive" };
+  const px8 = { fontFamily:"'Press Start 2P', cursive" };
+
+  return (
+    <div className={`flex flex-col ${isSmall ? 'p-3' : 'p-5'} w-full`}
+      style={{ maxWidth:'720px', margin:'0 auto', minHeight:'100%' }}>
+
+      {/* Header */}
+      <div className="flex items-center gap-3 mb-3">
+        <button type="button" onClick={goBack}
+          className="px-3 py-2 rounded-lg border-4 border-[#C8B488] bg-[#F4E4C1] hover:bg-[#E8D4A8]"
+          style={{ ...pxS, fontWeight:900, color:'#4A3020', fontSize:'12px' }}>← Back</button>
+        <div className="flex-1 min-w-0">
+          <div style={{ ...px8, fontSize: isSmall ? '10px' : '12px', color:'#4A3020' }}>DIARY</div>
+          {name && <div style={{ ...pxS, fontSize:'13px', color:'#6B4423', fontWeight:800 }} className="truncate">{name}</div>}
+        </div>
+        <div style={{ ...pxS, fontSize:'12px', color:'#aaa', fontWeight:800 }}>
+          {visible.length} {filter !== 'all' ? filter.toLowerCase() : 'entries'}
+        </div>
+      </div>
+
+      {/* Filter chips */}
+      <div className="flex gap-2 mb-3 overflow-x-auto pb-1" style={{ scrollbarWidth:'none' }}>
+        {ACTIONS.map(a => (
+          <button key={a} type="button"
+            onClick={() => setFilter(a)}
+            className={`shrink-0 px-3 py-1 rounded-full border-2 transition-all ${filter === a
+              ? 'bg-[#6B4423] border-[#6B4423] text-white'
+              : 'bg-white border-[#C8B488] text-[#4A3020] hover:bg-[#F4E4C1]'}`}
+            style={{ ...pxS, fontWeight:900, fontSize:'11px' }}>
+            {ICONS[a] || ''} {a === 'all' ? 'All' : a.charAt(0) + a.slice(1).toLowerCase()}
+          </button>
+        ))}
+      </div>
+
+      {/* Scrolling diary */}
+      <div className="scroll-y space-y-2 pb-4" style={{ maxHeight:'60vh' }}>
+        {loading && (
+          <div className="bg-white rounded-xl border-4 border-[#C8B488] p-4 text-center"
+            style={{ ...pxS, color:'#aaa' }}>Loading...</div>
+        )}
+        {!loading && visible.length === 0 && (
+          <div className="bg-white rounded-xl border-4 border-[#C8B488] p-6 text-center"
+            style={{ ...pxS, color:'#aaa', fontSize:'13px' }}>No entries yet.</div>
+        )}
+        {!loading && visible.map((t, i) => {
+          const c = COLORS[t.action] || COLORS.NOTE;
+          return (
+            <div key={i} className="rounded-xl border-4 p-3 shadow-sm"
+              style={{ background: c.bg, borderColor: c.border }}>
+              <div className="flex items-start gap-3">
+                <div style={{ fontSize:'22px', lineHeight:1, marginTop:'2px' }}>
+                  {ICONS[t.action] || '•'}
+                </div>
+                <div className="flex-1 min-w-0">
+                  {t.action === 'NOTE'
+                    ? <>
+                        <div style={{ ...pxS, fontSize:'10px', color:'#aaa', flexShrink:0, marginBottom:4 }}>{t.ts}</div>
+                        <div style={{ ...pxS, fontSize:'14px', color:'#4A3020', lineHeight:1.5 }}>{t.details || '(note)'}</div>
+                      </>
+                    : <>
+                        <div className="flex items-baseline justify-between gap-2 mb-1">
+                          <div style={{ ...px8, fontSize:'9px', color: c.label }}>{t.action}</div>
+                          <div style={{ ...pxS, fontSize:'10px', color:'#aaa', flexShrink:0 }}>{t.ts}</div>
+                        </div>
+                        {t.details && <div style={{ ...pxS, fontSize:'13px', color:'#4A3020', lineHeight:1.5 }}>{t.details}</div>}
+                      </>
+                  }
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+
+function SpecScreen(){
+  const { goBack } = useNavigation();
+  const { isSmall, isDesktop } = useScreenSize();
+  return (
+    <div className={`flex flex-col ${isSmall ? 'p-3' : isDesktop ? 'p-6' : 'p-4'} w-full pb-4 fade-in`}
+      style={{ maxWidth: isDesktop ? '1100px' : '680px', margin: '0 auto' }}>
+      <PlantCard title="SPEC">
+        <StatusMessage type="info" message="Spec screen placeholder." />
+        <PlantButton variant="ghost" onClick={goBack}>Back</PlantButton>
+      </PlantCard>
+    </div>
+  );
+}
+
+/* ===================== TICKER ===================== */
+function Ticker() {
+  const { homeData } = usePlantData();
+  const [now, setNow] = useState(new Date());
+  useEffect(() => { const t = setInterval(() => setNow(new Date()), 1000); return () => clearInterval(t); }, []);
+  const birthdays = (homeData && homeData.birthdays) ? homeData.birthdays : [];
+  const dueNow = (homeData && homeData.dueNow) ? homeData.dueNow : [];
+  const msg = [format12h(now), birthdays.length ? `Today's birthdays: ${birthdays.join(', ')}` : `No birthdays today`, dueNow.length ? `Needs water: ${dueNow.length}` : `No plants due now`].join('   •   ');
+  return (
+    <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-30 w-[92%] max-w-2xl overflow-hidden">
+      <div className="bg-[#6B4423] text-[#F4E4C1] border-4 border-[#4A3020] rounded-xl px-4 py-2 shadow-lg">
+        <div className="ticker-track" style={{ fontFamily:"'Press Start 2P', cursive", fontSize:'10px' }}>{msg}   •   {msg}</div>
+      </div>
+    </div>
+  );
+}
+
+/* ===================== APP SHELL ===================== */
+function BottomNav({ current, navigate, goBack }) {
+  const { isDesktop, w } = useScreenSize();
+  // Show on any non-desktop — phone OR tablet in portrait
+  if (isDesktop) return null;
+
+  const tabs = [
+    { id: 'home',      icon: '🏠', label: 'Home'   },
+    { id: 'my-plants', icon: '🌿', label: 'Plants'  },
+    { id: 'watering',  icon: '💧', label: 'Water'   },
+    { id: 'add',       icon: '➕', label: 'Add'     },
+    { id: 'quick-log', icon: '⚡', label: 'Log'     },
+  ];
+  const pxS = { fontFamily:"'Pixelify Sans', cursive" };
+  const isHome = current === 'home';
+
+  // Non-tab screens get a back button at left + remaining tabs
+  const isTab = tabs.some(t => t.id === current);
+
+  return (
+    <div className="shrink-0 flex items-stretch border-t-4 border-[#3d1f00] pb-safe"
+      style={{ background:'#2A1200', minHeight: 56 }}>
+      {!isTab && (
+        <button type="button" onClick={goBack}
+          className="flex flex-col items-center justify-center px-4 border-r-2 border-[#3d1f00] active:bg-[#3d1f00]"
+          style={{ ...pxS, color:'#C8B488', fontSize:'9px', fontWeight:900, minWidth:60 }}>
+          <span style={{ fontSize:'20px', lineHeight:1 }}>←</span>
+          Back
+        </button>
+      )}
+      {tabs.map(t => {
+        const active = current === t.id;
+        return (
+          <button key={t.id} type="button"
+            onClick={() => navigate(t.id)}
+            className="flex-1 flex flex-col items-center justify-center gap-0.5 active:bg-[#3d1f00] transition-colors"
+            style={{
+              ...pxS, fontSize:'9px', fontWeight:900,
+              color: active ? '#8BB55C' : '#8B6040',
+              background: active ? '#1a0900' : 'transparent',
+              borderTop: active ? '3px solid #8BB55C' : '3px solid transparent',
+            }}>
+            <span style={{ fontSize:'18px', lineHeight:1 }}>{t.icon}</span>
+            {t.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function AppContent() {
+  const { route, navigate, goBack, canGoBack } = useNavigation();
+  const { isDesktop } = useScreenSize();
+  const currentScreen = route && route.screen ? route.screen : 'home';
+
+  const render = () => {
+    switch (currentScreen) {
+      case 'home':            return <HomeScreen />;
+      case 'plant':           return <PlantScreen uid={(route.params && route.params.uid) ? route.params.uid : ''} />;
+      case 'watering':        return <WateringScreen />;
+      case 'quick-log':       return <QuickLogScreen />;
+      case 'add':             return <AddScreen />;
+      case 'my-plants':       return <MyPlantsScreen />;
+      case 'locations':       return <LocationsScreen />;
+      case 'plant-log':       return <PlantLogScreen />;
+      case 'diary':           return <DiaryScreen uid={(route.params && route.params.uid) ? route.params.uid : ''} name={(route.params && route.params.name) ? route.params.name : ''} />;
+      case 'spec':            return <SpecScreen />;
+      case 'batch-water':     return <BatchWaterScreen />;
+      case 'batch-fertilize': return <BatchFertilizeScreen />;
+      default:                return <HomeScreen />;
+    }
+  };
+
+  const showTopLeftNav = currentScreen !== 'home';
+
+  return (
+    <div style={{ display:'flex', flexDirection:'column', width:'100%', flex:1, minHeight:0, overflow:'hidden', position:'relative' }}>
+
+      {/* ── Background ── */}
+      <div style={{ position:'absolute', inset:0, background:'#8BC34A', zIndex:0, pointerEvents:'none' }}>
+        <div style={{
+          position:'absolute', inset:0, opacity:0.15,
+          backgroundImage:`repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,0.15) 2px,rgba(0,0,0,0.15) 4px),
+                           repeating-linear-gradient(90deg,transparent,transparent 2px,rgba(0,0,0,0.15) 2px,rgba(0,0,0,0.15) 4px)`
+        }}/>
+        <div className="emoji-hover" style={{ position:'absolute', bottom:'15%', left:'10%',  fontSize:36, lineHeight:1 }}>🌻</div>
+        <div style={{ position:'absolute', bottom:'25%', left:'26%',  fontSize:28, lineHeight:1 }} className="emoji-hover">🌷</div>
+        <div style={{ position:'absolute', bottom:'18%', right:'14%', fontSize:36, lineHeight:1 }} className="emoji-hover">🌺</div>
+        <div style={{ position:'absolute', bottom:'32%', right:'30%', fontSize:28, lineHeight:1 }} className="emoji-hover">🌼</div>
+        <div style={{ position:'absolute', top:'15%',    left:'20%',  fontSize:22, lineHeight:1 }} className="emoji-hover">🦋</div>
+        <div style={{ position:'absolute', top:'25%',    right:'22%', fontSize:22, lineHeight:1 }} className="emoji-hover">🐝</div>
+        <div style={{ position:'absolute', top:'8%',     right:'8%',  width:56, height:56, background:'#FFD700', borderRadius:'50%', border:'4px solid #FFA500', boxShadow:'0 4px 12px rgba(0,0,0,0.3)' }}/>
+      </div>
+
+      {/* ── Top-left nav (Back/Home) ── */}
+      {showTopLeftNav && (
+        <div style={{
+          position:'absolute',
+          top: isDesktop ? 16 : 'calc(12px + env(safe-area-inset-top))',
+          left: isDesktop ? 16 : 12,
+          zIndex: 30
+        }}>
+          {canGoBack ? (
+            <PlantButton onClick={goBack} variant="secondary" className="px-3 py-2">← Back</PlantButton>
+          ) : (
+            <PlantButton onClick={() => navigate('home')} variant="secondary" className="px-3 py-2">🏠 Home</PlantButton>
+          )}
+        </div>
+      )}
+
+      {/* ── Main content — fills between top and bottom nav ── */}
+      <div className="scroll-y"
+        style={{ flex:1, minHeight:0, position:'relative', zIndex:10, overflowY:'auto',
+          paddingTop: isDesktop ? 0 : 4 }}>
+        {render()}
+      </div>
+
+      {/* ── Ticker (home only) ── */}
+      {currentScreen === 'home' && <div style={{ position:'relative', zIndex:20 }}><Ticker /></div>}
+
+      {/* ── Bottom nav (mobile only) ── */}
+      <BottomNav current={currentScreen} navigate={navigate} goBack={goBack} />
+    </div>
+  );
+}
+
+/* ── GAS Banner tip (shows once, then dismissed) ── */
+function GasBannerTip() {
+  const { isMobile } = useScreenSize();
+  const [visible, setVisible] = React.useState(true);
+  if (!isMobile || !visible || !HAS_GAS) return null;
+  const pxS = { fontFamily:"'Pixelify Sans', cursive" };
+  return (
+    <div style={{
+      position:'fixed', bottom: 72, left: 8, right: 8, zIndex: 999,
+      background:'#1a0900', border:'3px solid #8BB55C', borderRadius:12,
+      padding:'10px 14px', display:'flex', alignItems:'center', gap:10,
+      boxShadow:'0 4px 20px rgba(0,0,0,0.5)'
+    }}>
+      <span style={{ fontSize:22 }}>📱</span>
+      <div style={{ flex:1 }}>
+        <div style={{ ...pxS, fontSize:'11px', color:'#8BB55C', fontWeight:900, marginBottom:2 }}>TIP: Add to Home Screen</div>
+        <div style={{ ...pxS, fontSize:'10px', color:'#C8B488', lineHeight:1.4 }}>
+          Share → Add to Home Screen for a full-screen app experience without the Google banner.
+        </div>
+      </div>
+      <button type="button" onClick={() => setVisible(false)}
+        style={{ ...pxS, fontSize:'18px', color:'#8B6040', background:'none', border:'none', padding:'0 4px', cursor:'pointer' }}>✕</button>
+    </div>
+  );
+}
+
+
+function PlantOSApp() {
+  return (
+    <NavigationProvider>
+      <PlantDataProvider>
+        <AppContent />
+        <GasBannerTip />
+      </PlantDataProvider>
+    </NavigationProvider>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<PlantOSApp />);
+</script>
+</body>
+</html>
